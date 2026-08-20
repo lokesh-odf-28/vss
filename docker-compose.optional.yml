@@ -1,0 +1,11 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vi
+      POSTGRES_PASSWORD: vi
+      POSTGRES_DB: video_intelligence
+    ports: ["5433:5432"]
+    volumes: ["vi_pgdata:/var/lib/postgresql/data"]
+volumes:
+  vi_pgdata:

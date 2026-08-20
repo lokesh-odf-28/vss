@@ -1,0 +1,54 @@
+import Link from 'next/link';
+
+const NAV = [
+  { href: '/use-cases', label: 'Use Cases', icon: '🧭' },
+  { href: '/runs',      label: 'Runs',      icon: '▶' },
+  { href: '/search',    label: 'Search',    icon: '🔎', todo: true },
+  { href: '/incidents', label: 'Incidents', icon: '📋', todo: true },
+  { href: '/alerts',    label: 'Alerts',    icon: '⚠️', todo: true },
+  { href: '/sources',   label: 'Sources',   icon: '🎥', todo: true },
+];
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen">
+      <aside className="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3 flex flex-col">
+        <div className="px-2 py-1">
+          <div className="font-semibold">Video Intelligence</div>
+          <div className="text-[10px] tracking-widest text-neutral-500 mt-0.5">ON NVIDIA VSS</div>
+        </div>
+        <nav className="mt-6 flex flex-col gap-0.5">
+          {NAV.map((n) => (
+            <Link
+              key={n.href}
+              href={n.todo ? '#' : n.href}
+              className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm ${
+                n.todo
+                  ? 'text-neutral-400 dark:text-neutral-600 cursor-default'
+                  : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900'
+              }`}
+            >
+              <span className="w-4 text-center text-xs">{n.icon}</span>
+              {n.label}
+              {n.todo && <span className="ml-auto text-[9px] uppercase tracking-wider">todo</span>}
+            </Link>
+          ))}
+        </nav>
+        <div className="mt-auto pt-3 border-t border-neutral-200 dark:border-neutral-800">
+          <VssBadge />
+        </div>
+      </aside>
+      <main className="flex-1 min-w-0">{children}</main>
+    </div>
+  );
+}
+
+async function VssBadge() {
+  const mock = process.env.USE_MOCK_VSS !== 'false';
+  return (
+    <div className="px-2 text-[10px] font-mono text-neutral-500">
+      VSS: <span className={mock ? 'text-amber-600' : 'text-emerald-600'}>{mock ? 'mock' : 'live'}</span>
+      <div className="mt-0.5">{mock ? 'no GPU needed' : process.env.LVS_URL}</div>
+    </div>
+  );
+}
