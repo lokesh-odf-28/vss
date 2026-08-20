@@ -16,7 +16,8 @@ export const storeBackend = hasDatabase ? 'postgres' : 'memory';
 
 export const listUseCases = impl.listUseCases;
 export const getUseCase   = impl.getUseCase;
-export const saveUseCase  = impl.saveUseCase;
+export const saveUseCase   = impl.saveUseCase;
+export const createUseCase = impl.createUseCase;
 export const listSources  = impl.listSources;
 export const getSource    = impl.getSource;
 export const listRuns     = impl.listRuns;

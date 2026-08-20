@@ -1,4 +1,5 @@
-import type { UseCase, Run, Source } from '../types';
+import type { UseCase, UseCaseInput, Run, Source } from '../types';
+import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
 
 /**
@@ -25,10 +26,79 @@ export async function getUseCase(id: string): Promise<UseCase | null> {
   return useCases.get(id) ?? null;
 }
 
-export async function saveUseCase(uc: UseCase): Promise<UseCase> {
-  const next = { ...uc, updatedAt: new Date().toISOString() };
-  useCases.set(next.id, next);
+/**
+ * Events are matched by `code`, not array position — a missing id means
+ * "new event", a present id means "keep this one" even if its label or
+ * severity changed. Anything not resubmitted is dropped. Mirrors the
+ * Postgres store's diff so both backends behave identically. See
+ * db/schema.sql: alert_rule.use_case_event_id cascades on delete, which is
+ * why dropping an event silently removes any alert rules built on it.
+ */
+export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseCase | null> {
+  const existing = useCases.get(id);
+  if (!existing) return null;
+
+  const byCode = new Map(existing.events.map((e) => [e.code, e]));
+  const events = input.events.map((e) => ({
+    id: e.id ?? byCode.get(e.code)?.id ?? `evt-${Math.random().toString(36).slice(2, 10)}`,
+    code: e.code,
+    label: e.label,
+    severity: e.severity,
+  }));
+
+  const next: UseCase = {
+    ...existing,
+    name: input.name,
+    icon: input.icon,
+    description: input.description,
+    scenario: input.scenario,
+    objectsOfInterest: input.objectsOfInterest,
+    events,
+    recordedPrompt: input.recordedPrompt,
+    recordedSystemPrompt: input.recordedSystemPrompt,
+    livePrompt: input.livePrompt,
+    liveSystemPrompt: input.liveSystemPrompt,
+    verificationCriteria: input.verificationCriteria,
+    supportsRecorded: input.supportsRecorded,
+    supportsLive: input.supportsLive,
+    updatedAt: new Date().toISOString(),
+  };
+  useCases.set(id, next);
   return next;
+}
+
+export async function createUseCase(input: UseCaseInput): Promise<UseCase> {
+  const id = `uc-${Math.random().toString(36).slice(2, 10)}`;
+  const now = new Date().toISOString();
+  const uc: UseCase = {
+    id,
+    slug: slugify(input.name),
+    name: input.name,
+    icon: input.icon || '🎥',
+    description: input.description,
+    scenario: input.scenario,
+    objectsOfInterest: input.objectsOfInterest,
+    events: input.events.map((e) => ({
+      id: `evt-${Math.random().toString(36).slice(2, 10)}`,
+      code: e.code,
+      label: e.label,
+      severity: e.severity,
+    })),
+    recordedPrompt: input.recordedPrompt,
+    recordedSystemPrompt: input.recordedSystemPrompt,
+    livePrompt: input.livePrompt,
+    liveSystemPrompt: input.liveSystemPrompt,
+    alertPrompt: '',
+    alertSystemPrompt: '',
+    verificationCriteria: input.verificationCriteria,
+    supportsRecorded: input.supportsRecorded,
+    supportsLive: input.supportsLive,
+    alertRuleCount: 0,
+    lastRunAt: null,
+    updatedAt: now,
+  };
+  useCases.set(id, uc);
+  return uc;
 }
 
 // ── sources ──────────────────────────────────────────────────────────────

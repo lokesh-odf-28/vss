@@ -9,6 +9,8 @@ export default async function RunDetailPage({ params }: { params: { id: string }
   const run = await getRun(params.id);
   if (!run) notFound();
 
+
+  
   return (
     <div className="p-6">
       <Link href="/runs" className="text-xs text-neutral-500 underline">← Runs</Link>

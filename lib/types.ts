@@ -12,6 +12,16 @@ export interface UseCaseEvent {
   severity: Severity;
 }
 
+/** What C2 submits. Missing id = new event; present id = keep/update existing
+ * (this is how the store tells a rename apart from a delete+create, so
+ * alert_rule foreign keys survive an edit). */
+export interface UseCaseEventInput {
+  id?: string;
+  code: string;
+  label: string;
+  severity: Severity;
+}
+
 /** One use case configures four VSS subsystems. See design doc §2. */
 export interface UseCase {
   id: string;
@@ -46,6 +56,24 @@ export interface UseCase {
   alertRuleCount: number;
   lastRunAt: string | null;
   updatedAt: string;
+}
+
+/** Write-side shape for C2 (create + edit). Computed fields — id, slug,
+ * alertRuleCount, lastRunAt, updatedAt — are never submitted by the form. */
+export interface UseCaseInput {
+  name: string;
+  icon: string;
+  description: string;
+  scenario: string;
+  objectsOfInterest: string[];
+  events: UseCaseEventInput[];
+  recordedPrompt: string;
+  recordedSystemPrompt: string;
+  livePrompt: string;
+  liveSystemPrompt: string;
+  verificationCriteria: string;
+  supportsRecorded: boolean;
+  supportsLive: boolean;
 }
 
 export interface Source {

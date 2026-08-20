@@ -18,9 +18,12 @@ export default async function UseCasesPage() {
             What you want the cameras to watch for. Each one runs on recorded video or a live feed.
           </p>
         </div>
-        <button className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white">
+        <Link
+          href="/use-cases/new"
+          className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white"
+        >
           ＋ New use case
-        </button>
+        </Link>
       </header>
 
       {useCases.length === 0 ? (

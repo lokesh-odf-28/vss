@@ -1,5 +1,6 @@
-import { q } from '../db';
-import type { UseCase, Run, Source } from '../types';
+import { q, withTransaction } from '../db';
+import type { UseCase, UseCaseInput, Run, Source } from '../types';
+import { slugify } from '../slug';
 
 /** Postgres-backed store. Schema: db/schema.sql */
 
@@ -66,6 +67,10 @@ const RUN_SELECT = `
   JOIN source   s ON s.id = r.source_id`;
 
 // ── use cases ────────────────────────────────────────────────────────────
+// TODO(auth): org/site are hardcoded to the seeded ones until sign-in exists
+// and a session can supply the real values. See build-sequence phase 4.
+const DEFAULT_ORG_ID  = '00000000-0000-0000-0000-0000000000a1';
+const DEFAULT_SITE_ID = '00000000-0000-0000-0000-0000000000c1';
 
 export async function listUseCases(): Promise<UseCase[]> {
   const rows = await q(`${USE_CASE_SELECT} ORDER BY u.name`);
@@ -80,23 +85,76 @@ export async function getUseCase(id: string): Promise<UseCase | null> {
   return toUseCase(rows[0], events);
 }
 
-export async function saveUseCase(uc: UseCase): Promise<UseCase> {
-  await q(
-    `UPDATE use_case SET
-       name = $2, icon = $3, description = $4, scenario = $5, objects_of_interest = $6,
-       recorded_prompt = $7, recorded_system_prompt = $8,
-       live_prompt = $9, live_system_prompt = $10,
-       alert_prompt = $11, alert_system_prompt = $12,
-       verification_criteria = $13,
-       supports_recorded = $14, supports_live = $15,
-       updated_at = now()
-     WHERE id = $1`,
-    [uc.id, uc.name, uc.icon, uc.description, uc.scenario, uc.objectsOfInterest,
-     uc.recordedPrompt, uc.recordedSystemPrompt, uc.livePrompt, uc.liveSystemPrompt,
-     uc.alertPrompt, uc.alertSystemPrompt, uc.verificationCriteria,
-     uc.supportsRecorded, uc.supportsLive],
-  );
-  return (await getUseCase(uc.id))!;
+/**
+ * Events are matched by `code` via ON CONFLICT (use_case_id, code) — a
+ * present event id from the client is accepted but not what drives the
+ * match, the unique constraint is. Anything not resubmitted is deleted,
+ * which cascades to alert_rule (schema.sql). One transaction so the use
+ * case and its events never end up out of sync on a partial failure.
+ */
+export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseCase | null> {
+  const exists = await q(`SELECT 1 FROM use_case WHERE id = $1`, [id]);
+  if (!exists.length) return null;
+
+  await withTransaction(async (tx) => {
+    await tx(
+      `UPDATE use_case SET
+         name = $2, icon = $3, description = $4, scenario = $5, objects_of_interest = $6,
+         recorded_prompt = $7, recorded_system_prompt = $8,
+         live_prompt = $9, live_system_prompt = $10,
+         verification_criteria = $11,
+         supports_recorded = $12, supports_live = $13,
+         updated_at = now()
+       WHERE id = $1`,
+      [id, input.name, input.icon, input.description, input.scenario, input.objectsOfInterest,
+       input.recordedPrompt, input.recordedSystemPrompt, input.livePrompt, input.liveSystemPrompt,
+       input.verificationCriteria, input.supportsRecorded, input.supportsLive],
+    );
+
+    const keepCodes = input.events.map((e) => e.code);
+    await tx(
+      `DELETE FROM use_case_event WHERE use_case_id = $1 AND NOT (code = ANY($2::text[]))`,
+      [id, keepCodes],
+    );
+    for (const e of input.events) {
+      await tx(
+        `INSERT INTO use_case_event (use_case_id, code, label, severity)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (use_case_id, code) DO UPDATE SET label = $3, severity = $4`,
+        [id, e.code, e.label, e.severity],
+      );
+    }
+  });
+
+  return getUseCase(id);
+}
+
+export async function createUseCase(input: UseCaseInput): Promise<UseCase> {
+  const slug = slugify(input.name);
+  const id = await withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `INSERT INTO use_case (
+         org_id, site_id, slug, name, icon, description, scenario, objects_of_interest,
+         recorded_prompt, recorded_system_prompt, live_prompt, live_system_prompt,
+         verification_criteria, supports_recorded, supports_live
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id`,
+      [DEFAULT_ORG_ID, DEFAULT_SITE_ID, slug, input.name, input.icon || '🎥', input.description,
+       input.scenario, input.objectsOfInterest, input.recordedPrompt, input.recordedSystemPrompt,
+       input.livePrompt, input.liveSystemPrompt, input.verificationCriteria,
+       input.supportsRecorded, input.supportsLive],
+    );
+    const newId = rows[0].id;
+    for (const e of input.events) {
+      await tx(
+        `INSERT INTO use_case_event (use_case_id, code, label, severity) VALUES ($1,$2,$3,$4)`,
+        [newId, e.code, e.label, e.severity],
+      );
+    }
+    return newId;
+  });
+
+  return (await getUseCase(id))!;
 }
 
 // ── sources ──────────────────────────────────────────────────────────────

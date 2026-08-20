@@ -31,3 +31,26 @@ export async function q<T = any>(text: string, params: unknown[] = []): Promise<
   const res = await pool().query(text, params);
   return res.rows as T[];
 }
+
+/**
+ * Multi-statement writes (use case + its events) go through here so a
+ * failure partway through can't leave the row and its events inconsistent.
+ */
+export async function withTransaction<T>(
+  fn: (query: <R = any>(text: string, params?: unknown[]) => Promise<R[]>) => Promise<T>,
+): Promise<T> {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const scoped = async <R = any>(text: string, params: unknown[] = []) =>
+      (await client.query(text, params)).rows as R[];
+    const result = await fn(scoped);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
