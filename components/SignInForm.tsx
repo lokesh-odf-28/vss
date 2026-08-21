@@ -64,7 +64,7 @@ export default function SignInForm({ next }: { next?: string }) {
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
       <p className="text-[11px] text-neutral-400 pt-1">
-        No sign-up yet — accounts are seeded. Password reset and invites come later.
+         Password reset and invites come later.
       </p>
     </form>
   );

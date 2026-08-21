@@ -1,5 +1,5 @@
 import { q, withTransaction } from '../db';
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity, SignUpInput } from '../types';
 import { slugify } from '../slug';
 
 /** Postgres-backed store. Schema: db/schema.sql */
@@ -82,6 +82,30 @@ export async function getUserByEmail(email: string): Promise<UserWithSecret | nu
 export async function getUserById(id: string): Promise<User | null> {
   const rows = await q(`SELECT * FROM app_user WHERE id = $1`, [id]);
   return rows.length ? toUser(rows[0]) : null;
+}
+
+/**
+ * The whole point of "org = user": there is no separate org-setup step and
+ * no add-a-teammate flow. One signup call creates both rows in a single
+ * transaction, or neither does. Uniqueness is enforced by app_user's
+ * existing UNIQUE(email) constraint — caught by the caller as a 23505.
+ */
+export async function createOrgAndUser(input: SignUpInput): Promise<User> {
+  return withTransaction(async (tx) => {
+    const org = await tx<{ id: string }>(
+      `INSERT INTO organization (name, contact_email) VALUES ($1, $2) RETURNING id`,
+      [input.orgName, input.email],
+    );
+    const orgId = org[0].id;
+
+    const rows = await tx(
+      `INSERT INTO app_user (org_id, email, name, role, status, onboarding_status, password_hash)
+       VALUES ($1, $2, $3, 'owner', 'active', 'complete', $4)
+       RETURNING *`,
+      [orgId, input.email, input.name, input.passwordHash],
+    );
+    return toUser(rows[0]);
+  });
 }
 
 export async function listUseCases(): Promise<UseCase[]> {

@@ -1,4 +1,4 @@
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity, SignUpInput } from '../types';
 import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
 
@@ -18,12 +18,11 @@ const sources = new Map<string, Source>(seedSources.map((s) => [s.id, s]));
 const runs = new Map<string, Run>();
 
 // ── users ────────────────────────────────────────────────────────────────
-// Dev fixture only. Password is 'password123'; the hash is pre-computed
-// because hashing is async and this module initialises synchronously.
-const DEV_ORG_ID = 'org-dev';
+// One dev fixture (password 'password123', pre-hashed since this module
+// initialises synchronously) plus whatever signup adds at runtime.
 const devUser: UserWithSecret = {
   id: 'user-dev',
-  orgId: DEV_ORG_ID,
+  orgId: 'org-dev',
   email: 'lokesh@opendatafabric.com',
   name: 'Lokesh',
   role: 'owner',
@@ -31,15 +30,33 @@ const devUser: UserWithSecret = {
   passwordHash:
     'scrypt$tp+Go5jk7omgbcn1Dj5tkw==$+83kJbhqabMOLfygc1/QknLE1R5SErNYo6Z6mt95sXthqz5KRsdR8XJaIZ/pU/rTzgPT+5xVxQ2UCo+fuDSkIQ==',
 };
+const users = new Map<string, UserWithSecret>([[devUser.id, devUser]]);
 
 export async function getUserByEmail(email: string): Promise<UserWithSecret | null> {
-  return email.toLowerCase() === devUser.email.toLowerCase() ? devUser : null;
+  const lower = email.toLowerCase();
+  return [...users.values()].find((u) => u.email.toLowerCase() === lower) ?? null;
 }
 
 export async function getUserById(id: string): Promise<User | null> {
-  if (id !== devUser.id) return null;
-  const { passwordHash, ...user } = devUser;
+  const u = users.get(id);
+  if (!u) return null;
+  const { passwordHash, ...user } = u;
   return user;
+}
+
+/** Mirrors postgres.ts: one org + its one user, or neither. No separate
+ * uniqueness check needed here since getUserByEmail scans the same map the
+ * caller already checked — see the route for the actual guard. */
+export async function createOrgAndUser(input: SignUpInput): Promise<User> {
+  const id = `user-${Math.random().toString(36).slice(2, 10)}`;
+  const orgId = `org-${Math.random().toString(36).slice(2, 10)}`;
+  const user: UserWithSecret = {
+    id, orgId, email: input.email, name: input.name,
+    role: 'owner', status: 'active', passwordHash: input.passwordHash,
+  };
+  users.set(id, user);
+  const { passwordHash, ...safe } = user;
+  return safe;
 }
 
 // ── use cases ────────────────────────────────────────────────────────────

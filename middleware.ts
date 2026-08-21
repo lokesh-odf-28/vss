@@ -9,7 +9,7 @@ import { SESSION_COOKIE, readSessionToken } from '@/lib/auth/session';
  * re-checked in currentUser() on the node side. Treat this as a cheap first
  * filter, not the authorisation boundary.
  */
-const PUBLIC_PATHS = ['/signin', '/api/auth/login', '/api/auth/logout'];
+const PUBLIC_PATHS = ['/signin', '/signup', '/api/auth/login', '/api/auth/logout', '/api/auth/signup'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

@@ -98,6 +98,16 @@ export interface AuthContext {
   orgId: string;
 }
 
+/** Signup creates an organization and its one user atomically — see
+ * "org = user" in project notes. There is no invite flow; this is the only
+ * way an app_user row is ever created. */
+export interface SignUpInput {
+  orgName: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+}
+
 export interface Source {
   id: string;
   name: string;
