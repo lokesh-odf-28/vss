@@ -1,4 +1,4 @@
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity } from '../types';
 import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
 
@@ -154,5 +154,65 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
   if (!cur) return null;
   const next = { ...cur, ...patch };
   runs.set(id, next);
+  return next;
+}
+
+// ── incidents ────────────────────────────────────────────────────────────
+
+const incidents = new Map<string, Incident>();
+
+export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
+  return [...incidents.values()]
+    .filter((i) => i.runId === runId)
+    .sort((a, b) => a.offsetMs - b.offsetMs);
+}
+
+export interface NewIncident {
+  sourceId: string;
+  runId: string;
+  useCaseId: string;
+  offsetMs: number;
+  eventCode: string;
+  severity: Severity;
+  description: string;
+  objectIds: string[];
+}
+
+export async function createIncidents(items: NewIncident[]): Promise<number> {
+  for (const i of items) {
+    const id = `inc-${Math.random().toString(36).slice(2, 10)}`;
+    incidents.set(id, {
+      id,
+      sourceId: i.sourceId,
+      runId: i.runId,
+      offsetMs: i.offsetMs,
+      eventCode: i.eventCode,
+      severity: i.severity,
+      description: i.description,
+      verdict: 'unverified',
+      thumbnailUrl: null,
+    });
+  }
+  return items.length;
+}
+
+/** Mirrors the Postgres guard: only the first caller to see a finished job wins. */
+export async function completeRunWithIncidents(
+  id: string, summary: string, items: Omit<NewIncident, 'runId'>[],
+): Promise<Run | null> {
+  const cur = runs.get(id);
+  if (!cur || cur.status !== 'processing') return null;
+
+  // Single-threaded, so status flip and insert cannot interleave.
+  const next: Run = {
+    ...cur,
+    status: 'complete',
+    analysisPercent: 100,
+    summary,
+    finishedAt: new Date().toISOString(),
+    incidentCount: items.length,
+  };
+  runs.set(id, next);
+  await createIncidents(items.map((i) => ({ ...i, runId: id })));
   return next;
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getRun } from '@/lib/store';
+import { getRun, listIncidentsByRun } from '@/lib/store';
+import IncidentTimeline from '@/components/IncidentTimeline';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +10,8 @@ export default async function RunDetailPage({ params }: { params: { id: string }
   const run = await getRun(params.id);
   if (!run) notFound();
 
+  const incidents = run.status === 'complete' ? await listIncidentsByRun(run.id) : [];
 
-  
   return (
     <div className="p-6">
       <Link href="/runs" className="text-xs text-neutral-500 underline">← Runs</Link>
@@ -29,18 +30,19 @@ export default async function RunDetailPage({ params }: { params: { id: string }
         </div>
       )}
 
+      {run.status === 'processing' && (
+        <div className="rounded-lg bg-blue-50 dark:bg-blue-950 p-4 text-sm text-blue-800 dark:text-blue-200">
+          Still analysing — <Link href="/runs" className="underline">watch progress</Link>.
+        </div>
+      )}
+
       {run.summary && (
         <div className="rounded-lg bg-neutral-100 dark:bg-neutral-900 p-4 text-sm leading-relaxed mb-5">
           <strong>Summary.</strong> {run.summary}
         </div>
       )}
 
-      <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-8 text-center">
-        <p className="text-sm text-neutral-500">Incident timeline and player go here.</p>
-        <p className="text-xs text-neutral-400 mt-2 font-mono">
-          TODO: parse incidents from LVS captions, render clickable timestamps that seek the player
-        </p>
-      </div>
+      {run.status === 'complete' && <IncidentTimeline incidents={incidents} />}
     </div>
   );
 }

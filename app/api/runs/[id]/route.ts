@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRun, updateRun } from '@/lib/store';
+import {
+  getRun, updateRun, completeRunWithIncidents, getUseCase,
+} from '@/lib/store';
 import { vss, isProgressing, mockProgress, useMock } from '@/lib/vss';
+import type { Severity } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,16 +30,38 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     }
 
     const summary = res.choices[0]?.message?.content ?? '';
-    const done = await updateRun(run.id, {
-      status: 'complete',
-      analysisPercent: 100,
+
+    // Gather everything BEFORE the transaction — these are network and DB
+    // reads that should not be held open inside it.
+    const drafts = await vss.detectedIncidents(run.externalJobId);
+
+    // Severity is authored by the user in C2 and looked up here — the model
+    // reports what it saw, the use case decides how much it matters. An event
+    // code we do not recognise falls back to medium rather than being
+    // dropped, so nothing detected goes silently missing.
+    const useCase = await getUseCase(run.useCaseId);
+    const severityByCode = new Map<string, Severity>(
+      (useCase?.events ?? []).map((e) => [e.code, e.severity]),
+    );
+
+    // Completing the run and writing its incidents happen together, so no
+    // concurrent poll can ever observe a finished run with zero incidents.
+    const done = await completeRunWithIncidents(
+      run.id,
       summary,
-      finishedAt: new Date().toISOString(),
-      // TODO: parse incidents out of the summary / captions and persist them
-      // to the incident table. Incidents are NOT children of this run.
-      incidentCount: 5,
-    });
-    return NextResponse.json({ data: done });
+      drafts.map((d) => ({
+        sourceId: run.sourceId,
+        useCaseId: run.useCaseId,
+        offsetMs: d.offsetMs,
+        eventCode: d.eventCode,
+        severity: severityByCode.get(d.eventCode) ?? 'medium',
+        description: d.description,
+        objectIds: d.objectIds,
+      })),
+    );
+
+    // null = another poll won the race; re-read for the consistent result.
+    return NextResponse.json({ data: done ?? (await getRun(run.id)) });
   } catch (e) {
     const failed = await updateRun(run.id, {
       status: 'failed',

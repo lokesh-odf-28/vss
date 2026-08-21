@@ -57,9 +57,23 @@ export function isProgressing(r: CompletionResponse): boolean {
   return r.object.endsWith('.progressing');
 }
 
+/**
+ * A detection as VSS reports it — no severity, because severity is authored
+ * by the user in C2 and looked up from the use case, not invented by the
+ * model. No id/runId either; those are assigned when it is persisted.
+ */
+export interface IncidentDraft {
+  offsetMs: number;
+  eventCode: string;
+  description: string;
+  objectIds: string[];
+}
+
 export interface VssClient {
   health(): Promise<{ ok: boolean; detail: string }>;
   summarize(req: SummarizeRequest): Promise<CompletionResponse>;
   /** Poll an in-flight job. Returns the same shape as summarize(). */
   poll(jobId: string): Promise<CompletionResponse>;
+  /** Detections for a finished job. Called once, when the run completes. */
+  detectedIncidents(jobId: string): Promise<IncidentDraft[]>;
 }

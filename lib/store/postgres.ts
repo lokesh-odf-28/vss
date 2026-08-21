@@ -1,5 +1,5 @@
 import { q, withTransaction } from '../db';
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity } from '../types';
 import { slugify } from '../slug';
 
 /** Postgres-backed store. Schema: db/schema.sql */
@@ -224,4 +224,94 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
   }
   if (sets.length) await q(`UPDATE run SET ${sets.join(', ')} WHERE id = $1`, vals);
   return getRun(id);
+}
+
+// ── incidents ────────────────────────────────────────────────────────────
+
+function toIncident(r: any): Incident {
+  return {
+    id: r.id,
+    sourceId: r.source_id,
+    runId: r.run_id,
+    offsetMs: r.offset_ms === null ? 0 : Number(r.offset_ms),
+    eventCode: r.event_code ?? '',
+    severity: r.severity,
+    description: r.description,
+    verdict: r.verdict,
+    thumbnailUrl: r.thumbnail_url,
+  };
+}
+
+export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
+  const rows = await q(
+    `SELECT * FROM incident WHERE run_id = $1 ORDER BY offset_ms NULLS LAST, started_at`,
+    [runId],
+  );
+  return rows.map(toIncident);
+}
+
+export interface NewIncident {
+  sourceId: string;
+  runId: string;
+  useCaseId: string;
+  offsetMs: number;
+  eventCode: string;
+  severity: Severity;
+  description: string;
+  objectIds: string[];
+}
+
+export async function createIncidents(items: NewIncident[]): Promise<number> {
+  if (items.length === 0) return 0;
+  await withTransaction(async (tx) => {
+    for (const i of items) {
+      await tx(
+        `INSERT INTO incident (source_id, run_id, use_case_id, started_at, offset_ms,
+                               event_code, severity, description, object_ids)
+         VALUES ($1,$2,$3, now(), $4,$5,$6,$7,$8)`,
+        [i.sourceId, i.runId, i.useCaseId, i.offsetMs, i.eventCode,
+         i.severity, i.description, i.objectIds],
+      );
+    }
+  });
+  return items.length;
+}
+
+/**
+ * Marks a run complete and writes its incidents in ONE transaction.
+ *
+ * The runs page polls every 2s and several tabs may poll at once, so two
+ * requests can both observe a finished job. The WHERE clause makes exactly
+ * one of them win. Doing the insert in the same transaction matters: split
+ * across two statements, a losing poll can read the run in the window after
+ * status flips but before incidents land, and briefly report "0 incidents".
+ *
+ * Returns null if another request already completed it.
+ */
+export async function completeRunWithIncidents(
+  id: string, summary: string, incidents: Omit<NewIncident, 'runId'>[],
+): Promise<Run | null> {
+  const won = await withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `UPDATE run
+          SET status = 'complete', analysis_percent = 100, summary = $2, finished_at = now()
+        WHERE id = $1 AND status = 'processing'
+        RETURNING id`,
+      [id, summary],
+    );
+    if (rows.length === 0) return false;   // someone else got there first
+
+    for (const i of incidents) {
+      await tx(
+        `INSERT INTO incident (source_id, run_id, use_case_id, started_at, offset_ms,
+                               event_code, severity, description, object_ids)
+         VALUES ($1,$2,$3, now(), $4,$5,$6,$7,$8)`,
+        [i.sourceId, id, i.useCaseId, i.offsetMs, i.eventCode,
+         i.severity, i.description, i.objectIds],
+      );
+    }
+    return true;
+  });
+
+  return won ? getRun(id) : null;
 }

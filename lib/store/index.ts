@@ -26,3 +26,6 @@ export const createRun    = impl.createRun;
 export const updateRun     = impl.updateRun;
 export const getUserByEmail = impl.getUserByEmail;
 export const getUserById    = impl.getUserById;
+export const completeRunWithIncidents = impl.completeRunWithIncidents;
+export const createIncidents = impl.createIncidents;
+export const listIncidentsByRun = impl.listIncidentsByRun;

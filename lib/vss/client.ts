@@ -56,4 +56,13 @@ export const realClient: VssClient = {
   poll(jobId: string) {
     return call<CompletionResponse>(`/v1/summarize/${jobId}`);
   },
+
+  // Real VSS does not hand back a structured incident list — detections have
+  // to be extracted from the per-chunk captions (/v1/generate_captions) or
+  // read out of Elasticsearch, which the LVS stack writes to. Returning empty
+  // means a real run completes with a summary and no timeline, which is
+  // honest; it does not invent detections that were never reported.
+  async detectedIncidents(_jobId: string) {
+    return [];
+  },
 };
