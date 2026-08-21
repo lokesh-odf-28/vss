@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { currentUser } from '@/lib/auth';
+import SignOutButton from './SignOutButton';
 
 const NAV = [
   { href: '/use-cases', label: 'Use Cases', icon: '🧭' },
@@ -9,7 +11,11 @@ const NAV = [
   { href: '/sources',   label: 'Sources',   icon: '🎥', todo: true },
 ];
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default async function AppShell({ children }: { children: React.ReactNode }) {
+  const user = await currentUser();
+  // Signed out (e.g. the sign-in page) renders bare — no sidebar to wrap.
+  if (!user) return <>{children}</>;
+
   return (
     <div className="flex min-h-screen">
       <aside className="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3 flex flex-col">
@@ -34,7 +40,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="mt-auto pt-3 border-t border-neutral-200 dark:border-neutral-800">
+        <div className="mt-auto pt-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2">
+          <div className="px-2">
+            <div className="text-xs font-medium truncate">{user.name}</div>
+            <div className="text-[10px] text-neutral-500 truncate">{user.email}</div>
+          </div>
+          <SignOutButton />
           <VssBadge />
         </div>
       </aside>

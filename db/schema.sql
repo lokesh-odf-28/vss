@@ -28,6 +28,8 @@ CREATE TABLE app_user (
                     CHECK (role IN ('owner','admin','member','viewer')),
   status            text NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active','invited','disabled')),
+  -- null until an invited user sets one; see db/migrations/001_auth.sql
+  password_hash     text,
   onboarding_status text NOT NULL DEFAULT 'pending_org_setup'
                     CHECK (onboarding_status IN
                       ('pending_org_setup','pending_first_source','complete')),

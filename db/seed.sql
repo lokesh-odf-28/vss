@@ -6,9 +6,11 @@ INSERT INTO organization (id, name, website, contact_email) VALUES
   ('00000000-0000-0000-0000-0000000000a1', 'Acme Logistics', 'https://acme.example', 'ops@acme.example')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO app_user (id, org_id, email, name, role, onboarding_status) VALUES
+-- Dev password is 'password123'. Replace before this is reachable by anyone else.
+INSERT INTO app_user (id, org_id, email, name, role, onboarding_status, password_hash) VALUES
   ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000a1',
-   'lokesh@acme.example', 'Lokesh', 'owner', 'complete')
+   'lokesh@acme.example', 'Lokesh', 'owner', 'complete',
+   'scrypt$tp+Go5jk7omgbcn1Dj5tkw==$+83kJbhqabMOLfygc1/QknLE1R5SErNYo6Z6mt95sXthqz5KRsdR8XJaIZ/pU/rTzgPT+5xVxQ2UCo+fuDSkIQ==')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO site (id, org_id, name, location, timezone) VALUES

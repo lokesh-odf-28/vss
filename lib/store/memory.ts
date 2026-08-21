@@ -1,4 +1,4 @@
-import type { UseCase, UseCaseInput, Run, Source } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext } from '../types';
 import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
 
@@ -16,6 +16,31 @@ import { seedUseCases, seedSources } from '../seed';
 const useCases = new Map<string, UseCase>(seedUseCases.map((u) => [u.id, u]));
 const sources = new Map<string, Source>(seedSources.map((s) => [s.id, s]));
 const runs = new Map<string, Run>();
+
+// ── users ────────────────────────────────────────────────────────────────
+// Dev fixture only. Password is 'password123'; the hash is pre-computed
+// because hashing is async and this module initialises synchronously.
+const DEV_ORG_ID = 'org-dev';
+const devUser: UserWithSecret = {
+  id: 'user-dev',
+  orgId: DEV_ORG_ID,
+  email: 'lokesh@opendatafabric.com',
+  name: 'Lokesh',
+  role: 'owner',
+  status: 'active',
+  passwordHash:
+    'scrypt$tp+Go5jk7omgbcn1Dj5tkw==$+83kJbhqabMOLfygc1/QknLE1R5SErNYo6Z6mt95sXthqz5KRsdR8XJaIZ/pU/rTzgPT+5xVxQ2UCo+fuDSkIQ==',
+};
+
+export async function getUserByEmail(email: string): Promise<UserWithSecret | null> {
+  return email.toLowerCase() === devUser.email.toLowerCase() ? devUser : null;
+}
+
+export async function getUserById(id: string): Promise<User | null> {
+  if (id !== devUser.id) return null;
+  const { passwordHash, ...user } = devUser;
+  return user;
+}
 
 // ── use cases ────────────────────────────────────────────────────────────
 export async function listUseCases(): Promise<UseCase[]> {
@@ -67,7 +92,7 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
   return next;
 }
 
-export async function createUseCase(input: UseCaseInput): Promise<UseCase> {
+export async function createUseCase(input: UseCaseInput, _ctx: AuthContext): Promise<UseCase> {
   const id = `uc-${Math.random().toString(36).slice(2, 10)}`;
   const now = new Date().toISOString();
   const uc: UseCase = {

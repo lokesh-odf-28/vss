@@ -1,5 +1,5 @@
 import { q, withTransaction } from '../db';
-import type { UseCase, UseCaseInput, Run, Source } from '../types';
+import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext } from '../types';
 import { slugify } from '../slug';
 
 /** Postgres-backed store. Schema: db/schema.sql */
@@ -67,10 +67,22 @@ const RUN_SELECT = `
   JOIN source   s ON s.id = r.source_id`;
 
 // ── use cases ────────────────────────────────────────────────────────────
-// TODO(auth): org/site are hardcoded to the seeded ones until sign-in exists
-// and a session can supply the real values. See build-sequence phase 4.
-const DEFAULT_ORG_ID  = '00000000-0000-0000-0000-0000000000a1';
-const DEFAULT_SITE_ID = '00000000-0000-0000-0000-0000000000c1';
+// ── users ────────────────────────────────────────────────────────────────
+
+function toUser(r: any): User {
+  return { id: r.id, orgId: r.org_id, email: r.email, name: r.name, role: r.role, status: r.status };
+}
+
+export async function getUserByEmail(email: string): Promise<UserWithSecret | null> {
+  const rows = await q(`SELECT * FROM app_user WHERE lower(email) = lower($1)`, [email]);
+  if (!rows.length) return null;
+  return { ...toUser(rows[0]), passwordHash: rows[0].password_hash };
+}
+
+export async function getUserById(id: string): Promise<User | null> {
+  const rows = await q(`SELECT * FROM app_user WHERE id = $1`, [id]);
+  return rows.length ? toUser(rows[0]) : null;
+}
 
 export async function listUseCases(): Promise<UseCase[]> {
   const rows = await q(`${USE_CASE_SELECT} ORDER BY u.name`);
@@ -129,7 +141,7 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
   return getUseCase(id);
 }
 
-export async function createUseCase(input: UseCaseInput): Promise<UseCase> {
+export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Promise<UseCase> {
   const slug = slugify(input.name);
   const id = await withTransaction(async (tx) => {
     const rows = await tx<{ id: string }>(
@@ -139,7 +151,9 @@ export async function createUseCase(input: UseCaseInput): Promise<UseCase> {
          verification_criteria, supports_recorded, supports_live
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING id`,
-      [DEFAULT_ORG_ID, DEFAULT_SITE_ID, slug, input.name, input.icon || '🎥', input.description,
+      // site_id null = org-wide. Guessing a site would be worse than
+      // leaving it unscoped; B2 can narrow it later.
+      [ctx.orgId, null, slug, input.name, input.icon || '🎥', input.description,
        input.scenario, input.objectsOfInterest, input.recordedPrompt, input.recordedSystemPrompt,
        input.livePrompt, input.liveSystemPrompt, input.verificationCriteria,
        input.supportsRecorded, input.supportsLive],

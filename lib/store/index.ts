@@ -23,4 +23,6 @@ export const getSource    = impl.getSource;
 export const listRuns     = impl.listRuns;
 export const getRun       = impl.getRun;
 export const createRun    = impl.createRun;
-export const updateRun    = impl.updateRun;
+export const updateRun     = impl.updateRun;
+export const getUserByEmail = impl.getUserByEmail;
+export const getUserById    = impl.getUserById;

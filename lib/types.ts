@@ -76,6 +76,28 @@ export interface UseCaseInput {
   supportsLive: boolean;
 }
 
+export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
+
+export interface User {
+  id: string;
+  orgId: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  status: 'active' | 'invited' | 'disabled';
+}
+
+/** Only ever used inside the login route — never returned to a client. */
+export interface UserWithSecret extends User {
+  passwordHash: string | null;
+}
+
+/** Who is acting. Threaded into writes so rows land in the right org. */
+export interface AuthContext {
+  userId: string;
+  orgId: string;
+}
+
 export interface Source {
   id: string;
   name: string;

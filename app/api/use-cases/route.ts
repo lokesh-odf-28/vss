@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listUseCases, createUseCase } from '@/lib/store';
+import { requireUser, UnauthorizedError } from '@/lib/auth';
 import type { UseCaseInput } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,16 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  let ctx;
+  try {
+    ctx = await requireUser();
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    }
+    throw e;
+  }
+
   const input = (await req.json()) as UseCaseInput;
 
   if (!input.name?.trim()) {
@@ -19,7 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const created = await createUseCase(input);
+    const created = await createUseCase(input, ctx);
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (e: any) {
     // unique_violation on (org_id, slug) — same name already used
