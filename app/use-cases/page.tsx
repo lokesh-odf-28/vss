@@ -1,13 +1,12 @@
 import Link from 'next/link';
-import { listUseCases, listSources } from '@/lib/store';
+import { listUseCases } from '@/lib/store';
 import RunButton from '@/components/RunButton';
 
 export const dynamic = 'force-dynamic';
 
 /** C1 — Use Case Library. The home screen. Design doc §6. */
 export default async function UseCasesPage() {
-  const [useCases, sources] = await Promise.all([listUseCases(), listSources()]);
-  const defaultSourceId = sources.find((s) => s.status === 'online')?.id ?? null;
+  const useCases = await listUseCases();
 
   return (
     <div className="p-6">
@@ -61,7 +60,7 @@ export default async function UseCasesPage() {
                   >
                     Edit
                   </Link>
-                  <RunButton useCaseId={uc.id} sourceId={defaultSourceId} />
+                  <RunButton useCaseId={uc.id} />
                 </div>
               </div>
             </div>
