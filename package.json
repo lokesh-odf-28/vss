@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -13,10 +12,12 @@
     "db:reset": "PGPASSWORD=vi /Library/PostgreSQL/18/bin/psql -h localhost -U vi -d video_intelligence -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\" && npm run db:setup"
   },
   "dependencies": {
+    "@types/nodemailer": "^8.0.1",
     "next": "14.2.5",
+    "nodemailer": "^9.0.5",
+    "pg": "8.12.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "pg": "8.12.0"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/node": "20.14.10",

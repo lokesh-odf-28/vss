@@ -1,8 +1,24 @@
 import { q, withTransaction } from '../db';
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity, SignUpInput } from '../types';
+import type {
+  UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext,
+  Incident, Severity, SignUpInput, CreateOtpChallengeInput, OtpChallengeRow, OtpPurpose,
+} from '../types';
 import { slugify } from '../slug';
 
-/** Postgres-backed store. Schema: db/schema.sql */
+/**
+ * Postgres-backed store. Schema: db/schema.sql
+ *
+ * ORG SCOPING: every exported read/write that touches use_case, source or run
+ * takes an orgId and filters by it — the session's org, never a value the
+ * client can supply. A row that exists but belongs to a different org
+ * behaves exactly like a row that does not exist (404, not 403) so an id
+ * cannot be used to probe what other organizations have.
+ *
+ * A few `*Raw` helpers below skip that filter deliberately — they are only
+ * ever called on an id the caller already proved ownership of earlier in the
+ * same request (e.g. completeRunWithIncidents re-reading a run right after
+ * updating the row it was just handed). They are not exported.
+ */
 
 // ── mappers ──────────────────────────────────────────────────────────────
 
@@ -53,25 +69,44 @@ function toRun(r: any): Run {
   };
 }
 
+function toUser(r: any): User {
+  return { id: r.id, orgId: r.org_id, email: r.email, name: r.name, role: r.role, status: r.status };
+}
+
+function toIncident(r: any): Incident {
+  return {
+    id: r.id,
+    sourceId: r.source_id,
+    runId: r.run_id,
+    offsetMs: r.offset_ms === null ? 0 : Number(r.offset_ms),
+    eventCode: r.event_code ?? '',
+    severity: r.severity,
+    description: r.description,
+    verdict: r.verdict,
+    thumbnailUrl: r.thumbnail_url,
+  };
+}
+
 const USE_CASE_SELECT = `
   SELECT u.*,
     (SELECT count(*) FROM alert_rule ar WHERE ar.use_case_id = u.id AND ar.enabled) AS alert_rule_count,
     (SELECT max(r.started_at) FROM run r WHERE r.use_case_id = u.id)                AS last_run_at
   FROM use_case u`;
 
+// source has no org_id column directly — it belongs to a site, which belongs
+// to an org. Every source query joins through site to scope by org.
+const SOURCE_SELECT = `
+  SELECT s.* FROM source s JOIN site st ON st.id = s.site_id`;
+
+// run has no org_id column either — it belongs to a use_case, which does.
 const RUN_SELECT = `
-  SELECT r.*, u.name AS use_case_name, s.name AS source_name,
+  SELECT r.*, u.name AS use_case_name, so.name AS source_name,
     (SELECT count(*) FROM incident i WHERE i.run_id = r.id) AS incident_count
   FROM run r
   JOIN use_case u ON u.id = r.use_case_id
-  JOIN source   s ON s.id = r.source_id`;
+  JOIN source   so ON so.id = r.source_id`;
 
-// ── use cases ────────────────────────────────────────────────────────────
 // ── users ────────────────────────────────────────────────────────────────
-
-function toUser(r: any): User {
-  return { id: r.id, orgId: r.org_id, email: r.email, name: r.name, role: r.role, status: r.status };
-}
 
 export async function getUserByEmail(email: string): Promise<UserWithSecret | null> {
   const rows = await q(`SELECT * FROM app_user WHERE lower(email) = lower($1)`, [email]);
@@ -85,10 +120,9 @@ export async function getUserById(id: string): Promise<User | null> {
 }
 
 /**
- * The whole point of "org = user": there is no separate org-setup step and
- * no add-a-teammate flow. One signup call creates both rows in a single
- * transaction, or neither does. Uniqueness is enforced by app_user's
- * existing UNIQUE(email) constraint — caught by the caller as a 23505.
+ * "org = user": one signup call creates both rows in a single transaction,
+ * or neither does. Uniqueness is enforced by app_user's UNIQUE(email)
+ * constraint — the caller catches the 23505.
  */
 export async function createOrgAndUser(input: SignUpInput): Promise<User> {
   return withTransaction(async (tx) => {
@@ -108,14 +142,77 @@ export async function createOrgAndUser(input: SignUpInput): Promise<User> {
   });
 }
 
-export async function listUseCases(): Promise<UseCase[]> {
-  const rows = await q(`${USE_CASE_SELECT} ORDER BY u.name`);
-  const events = await q(`SELECT * FROM use_case_event`);
+export async function updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+  await q(`UPDATE app_user SET password_hash = $2 WHERE id = $1`, [userId, passwordHash]);
+}
+
+// ── otp challenges ───────────────────────────────────────────────────────
+// Pure data access only — hashing, expiry policy and attempt limits live in
+// lib/auth/otp.ts, same split as passwords (store returns a hash, the route
+// or lib/auth compares it).
+
+export async function createOtpChallenge(input: CreateOtpChallengeInput): Promise<void> {
+  await q(
+    `INSERT INTO otp_challenge (purpose, email, otp_hash, expires_at, org_name, name, password_hash, user_id, attempts)
+     VALUES ($1, lower($2), $3, $4, $5, $6, $7, $8, 0)
+     ON CONFLICT (email, purpose) DO UPDATE SET
+       otp_hash = $3, expires_at = $4, org_name = $5, name = $6,
+       password_hash = $7, user_id = $8, attempts = 0, created_at = now()`,
+    [input.purpose, input.email, input.otpHash, input.expiresAt,
+     input.orgName ?? null, input.name ?? null, input.passwordHash ?? null, input.userId ?? null],
+  );
+}
+
+export async function getOtpChallenge(purpose: OtpPurpose, email: string): Promise<OtpChallengeRow | null> {
+  const rows = await q(
+    `SELECT * FROM otp_challenge WHERE email = lower($1) AND purpose = $2`,
+    [email, purpose],
+  );
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    otpHash: r.otp_hash,
+    attempts: r.attempts,
+    expiresAt: new Date(r.expires_at).toISOString(),
+    orgName: r.org_name ?? undefined,
+    name: r.name ?? undefined,
+    passwordHash: r.password_hash ?? undefined,
+    userId: r.user_id ?? undefined,
+  };
+}
+
+export async function incrementOtpAttempts(purpose: OtpPurpose, email: string): Promise<void> {
+  await q(
+    `UPDATE otp_challenge SET attempts = attempts + 1 WHERE email = lower($1) AND purpose = $2`,
+    [email, purpose],
+  );
+}
+
+export async function deleteOtpChallenge(purpose: OtpPurpose, email: string): Promise<void> {
+  await q(`DELETE FROM otp_challenge WHERE email = lower($1) AND purpose = $2`, [email, purpose]);
+}
+
+// ── use cases ────────────────────────────────────────────────────────────
+
+async function getUseCaseRaw(id: string): Promise<UseCase | null> {
+  const rows = await q(`${USE_CASE_SELECT} WHERE u.id = $1`, [id]);
+  if (!rows.length) return null;
+  const events = await q(`SELECT * FROM use_case_event WHERE use_case_id = $1`, [id]);
+  return toUseCase(rows[0], events);
+}
+
+export async function listUseCases(orgId: string): Promise<UseCase[]> {
+  const rows = await q(`${USE_CASE_SELECT} WHERE u.org_id = $1 ORDER BY u.name`, [orgId]);
+  if (!rows.length) return [];
+  const events = await q(
+    `SELECT * FROM use_case_event WHERE use_case_id = ANY($1::uuid[])`,
+    [rows.map((r) => r.id)],
+  );
   return rows.map((r) => toUseCase(r, events));
 }
 
-export async function getUseCase(id: string): Promise<UseCase | null> {
-  const rows = await q(`${USE_CASE_SELECT} WHERE u.id = $1`, [id]);
+export async function getUseCase(id: string, orgId: string): Promise<UseCase | null> {
+  const rows = await q(`${USE_CASE_SELECT} WHERE u.id = $1 AND u.org_id = $2`, [id, orgId]);
   if (!rows.length) return null;
   const events = await q(`SELECT * FROM use_case_event WHERE use_case_id = $1`, [id]);
   return toUseCase(rows[0], events);
@@ -128,9 +225,9 @@ export async function getUseCase(id: string): Promise<UseCase | null> {
  * which cascades to alert_rule (schema.sql). One transaction so the use
  * case and its events never end up out of sync on a partial failure.
  */
-export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseCase | null> {
-  const exists = await q(`SELECT 1 FROM use_case WHERE id = $1`, [id]);
-  if (!exists.length) return null;
+export async function saveUseCase(id: string, orgId: string, input: UseCaseInput): Promise<UseCase | null> {
+  const owns = await q(`SELECT 1 FROM use_case WHERE id = $1 AND org_id = $2`, [id, orgId]);
+  if (!owns.length) return null;
 
   await withTransaction(async (tx) => {
     await tx(
@@ -141,10 +238,10 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
          verification_criteria = $11,
          supports_recorded = $12, supports_live = $13,
          updated_at = now()
-       WHERE id = $1`,
+       WHERE id = $1 AND org_id = $14`,
       [id, input.name, input.icon, input.description, input.scenario, input.objectsOfInterest,
        input.recordedPrompt, input.recordedSystemPrompt, input.livePrompt, input.liveSystemPrompt,
-       input.verificationCriteria, input.supportsRecorded, input.supportsLive],
+       input.verificationCriteria, input.supportsRecorded, input.supportsLive, orgId],
     );
 
     const keepCodes = input.events.map((e) => e.code);
@@ -162,7 +259,7 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
     }
   });
 
-  return getUseCase(id);
+  return getUseCaseRaw(id);
 }
 
 export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Promise<UseCase> {
@@ -192,20 +289,20 @@ export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Prom
     return newId;
   });
 
-  return (await getUseCase(id))!;
+  return (await getUseCaseRaw(id))!;
 }
 
 // ── sources ──────────────────────────────────────────────────────────────
 
-export async function listSources(): Promise<Source[]> {
-  const rows = await q(`SELECT * FROM source ORDER BY name`);
+export async function listSources(orgId: string): Promise<Source[]> {
+  const rows = await q(`${SOURCE_SELECT} WHERE st.org_id = $1 ORDER BY s.name`, [orgId]);
   return rows.map((r) => ({
     id: r.id, name: r.name, kind: r.kind, status: r.status, vstSensorId: r.vst_sensor_id ?? undefined,
   }));
 }
 
-export async function getSource(id: string): Promise<Source | null> {
-  const rows = await q(`SELECT * FROM source WHERE id = $1`, [id]);
+export async function getSource(id: string, orgId: string): Promise<Source | null> {
+  const rows = await q(`${SOURCE_SELECT} WHERE s.id = $1 AND st.org_id = $2`, [id, orgId]);
   if (!rows.length) return null;
   const r = rows[0];
   return { id: r.id, name: r.name, kind: r.kind, status: r.status, vstSensorId: r.vst_sensor_id ?? undefined };
@@ -213,15 +310,27 @@ export async function getSource(id: string): Promise<Source | null> {
 
 // ── runs ─────────────────────────────────────────────────────────────────
 
-export async function listRuns(): Promise<Run[]> {
-  return (await q(`${RUN_SELECT} ORDER BY r.started_at DESC LIMIT 50`)).map(toRun);
-}
-
-export async function getRun(id: string): Promise<Run | null> {
+async function getRunRaw(id: string): Promise<Run | null> {
   const rows = await q(`${RUN_SELECT} WHERE r.id = $1`, [id]);
   return rows.length ? toRun(rows[0]) : null;
 }
 
+export async function listRuns(orgId: string): Promise<Run[]> {
+  return (await q(`${RUN_SELECT} WHERE u.org_id = $1 ORDER BY r.started_at DESC LIMIT 50`, [orgId]))
+    .map(toRun);
+}
+
+export async function getRun(id: string, orgId: string): Promise<Run | null> {
+  const rows = await q(`${RUN_SELECT} WHERE r.id = $1 AND u.org_id = $2`, [id, orgId]);
+  return rows.length ? toRun(rows[0]) : null;
+}
+
+/**
+ * No orgId parameter, deliberately: by the time a route can construct a Run
+ * to insert, it has already resolved useCaseId and sourceId through
+ * getUseCase()/getSource() scoped to the caller's org — an unowned id would
+ * have 400'd before this is ever called.
+ */
 export async function createRun(r: Run): Promise<Run> {
   const rows = await q(
     `INSERT INTO run (use_case_id, source_id, mode, status, upload_percent,
@@ -230,9 +339,10 @@ export async function createRun(r: Run): Promise<Run> {
     [r.useCaseId, r.sourceId, r.mode, r.status, r.uploadPercent,
      r.analysisPercent, r.externalJobId, r.errorMessage],
   );
-  return (await getRun(rows[0].id))!;
+  return (await getRunRaw(rows[0].id))!;
 }
 
+/** Same reasoning as createRun — id is only ever one the caller already owns. */
 export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | null> {
   const map: Record<string, string> = {
     status: 'status', uploadPercent: 'upload_percent', analysisPercent: 'analysis_percent',
@@ -247,24 +357,10 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
     sets.push(`${map[k]} = $${vals.length}`);
   }
   if (sets.length) await q(`UPDATE run SET ${sets.join(', ')} WHERE id = $1`, vals);
-  return getRun(id);
+  return getRunRaw(id);
 }
 
 // ── incidents ────────────────────────────────────────────────────────────
-
-function toIncident(r: any): Incident {
-  return {
-    id: r.id,
-    sourceId: r.source_id,
-    runId: r.run_id,
-    offsetMs: r.offset_ms === null ? 0 : Number(r.offset_ms),
-    eventCode: r.event_code ?? '',
-    severity: r.severity,
-    description: r.description,
-    verdict: r.verdict,
-    thumbnailUrl: r.thumbnail_url,
-  };
-}
 
 export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
   const rows = await q(
@@ -310,7 +406,8 @@ export async function createIncidents(items: NewIncident[]): Promise<number> {
  * across two statements, a losing poll can read the run in the window after
  * status flips but before incidents land, and briefly report "0 incidents".
  *
- * Returns null if another request already completed it.
+ * Returns null if another request already completed it. No orgId parameter
+ * — same reasoning as createRun/updateRun.
  */
 export async function completeRunWithIncidents(
   id: string, summary: string, incidents: Omit<NewIncident, 'runId'>[],
@@ -337,5 +434,5 @@ export async function completeRunWithIncidents(
     return true;
   });
 
-  return won ? getRun(id) : null;
+  return won ? getRunRaw(id) : null;
 }

@@ -1,28 +1,50 @@
-import type { UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext, Incident, Severity, SignUpInput } from '../types';
+import type {
+  UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext,
+  Incident, Severity, SignUpInput, CreateOtpChallengeInput, OtpChallengeRow, OtpPurpose,
+} from '../types';
 import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
 
 /**
  * In-memory store so `npm run dev` works with zero setup.
  *
- * SWAP POINT: replace the bodies below with SQL against db/schema.sql when you
- * are ready for Postgres (`npm run db:up && npm run db:schema`). Every caller
- * goes through this module, so nothing else in the app has to change.
+ * ORG SCOPING mirrors postgres.ts: every stored use case, source and run is
+ * tagged internally with the org that owns it, and every exported read/write
+ * filters on it. Seed fixtures all belong to DEV_ORG_ID so the existing dev
+ * login keeps seeing them; anything created via signup gets its own org and
+ * starts with nothing, same as it would against Postgres.
  *
- * Note: module state resets on hot reload in dev. That is fine for a scaffold
- * and is exactly the pain that should push you to Postgres.
+ * SWAP POINT: this whole file exists so `npm run dev` needs zero setup.
+ * Once DATABASE_URL is set, lib/store/index.ts routes here never run.
+ *
+ * Note: module state resets on hot reload in dev.
  */
 
-const useCases = new Map<string, UseCase>(seedUseCases.map((u) => [u.id, u]));
-const sources = new Map<string, Source>(seedSources.map((s) => [s.id, s]));
-const runs = new Map<string, Run>();
+const DEV_ORG_ID = 'org-dev';
+
+type Tagged<T> = T & { _orgId: string };
+
+const useCases = new Map<string, Tagged<UseCase>>(
+  seedUseCases.map((u) => [u.id, { ...u, _orgId: DEV_ORG_ID }]),
+);
+const sources = new Map<string, Tagged<Source>>(
+  seedSources.map((s) => [s.id, { ...s, _orgId: DEV_ORG_ID }]),
+);
+const runs = new Map<string, Tagged<Run>>();
+const incidents = new Map<string, Incident>();
+const otpChallenges = new Map<string, OtpChallengeRow & { purpose: OtpPurpose }>();
+const otpKey = (purpose: OtpPurpose, email: string) => `${purpose}:${email.toLowerCase()}`;
+
+function strip<T extends { _orgId: string }>({ _orgId, ...rest }: T): Omit<T, '_orgId'> {
+  return rest;
+}
 
 // ── users ────────────────────────────────────────────────────────────────
 // One dev fixture (password 'password123', pre-hashed since this module
 // initialises synchronously) plus whatever signup adds at runtime.
 const devUser: UserWithSecret = {
   id: 'user-dev',
-  orgId: 'org-dev',
+  orgId: DEV_ORG_ID,
   email: 'lokesh@opendatafabric.com',
   name: 'Lokesh',
   role: 'owner',
@@ -44,9 +66,7 @@ export async function getUserById(id: string): Promise<User | null> {
   return user;
 }
 
-/** Mirrors postgres.ts: one org + its one user, or neither. No separate
- * uniqueness check needed here since getUserByEmail scans the same map the
- * caller already checked — see the route for the actual guard. */
+/** Mirrors postgres.ts: one org + its one user, or neither. */
 export async function createOrgAndUser(input: SignUpInput): Promise<User> {
   const id = `user-${Math.random().toString(36).slice(2, 10)}`;
   const orgId = `org-${Math.random().toString(36).slice(2, 10)}`;
@@ -59,13 +79,51 @@ export async function createOrgAndUser(input: SignUpInput): Promise<User> {
   return safe;
 }
 
-// ── use cases ────────────────────────────────────────────────────────────
-export async function listUseCases(): Promise<UseCase[]> {
-  return [...useCases.values()].sort((a, b) => a.name.localeCompare(b.name));
+export async function updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+  const u = users.get(userId);
+  if (u) users.set(userId, { ...u, passwordHash });
 }
 
-export async function getUseCase(id: string): Promise<UseCase | null> {
-  return useCases.get(id) ?? null;
+// ── otp challenges ───────────────────────────────────────────────────────
+
+export async function createOtpChallenge(input: CreateOtpChallengeInput): Promise<void> {
+  otpChallenges.set(otpKey(input.purpose, input.email), {
+    purpose: input.purpose,
+    otpHash: input.otpHash,
+    attempts: 0,
+    expiresAt: input.expiresAt,
+    orgName: input.orgName,
+    name: input.name,
+    passwordHash: input.passwordHash,
+    userId: input.userId,
+  });
+}
+
+export async function getOtpChallenge(purpose: OtpPurpose, email: string): Promise<OtpChallengeRow | null> {
+  return otpChallenges.get(otpKey(purpose, email)) ?? null;
+}
+
+export async function incrementOtpAttempts(purpose: OtpPurpose, email: string): Promise<void> {
+  const c = otpChallenges.get(otpKey(purpose, email));
+  if (c) c.attempts += 1;
+}
+
+export async function deleteOtpChallenge(purpose: OtpPurpose, email: string): Promise<void> {
+  otpChallenges.delete(otpKey(purpose, email));
+}
+
+// ── use cases ────────────────────────────────────────────────────────────
+
+export async function listUseCases(orgId: string): Promise<UseCase[]> {
+  return [...useCases.values()]
+    .filter((u) => u._orgId === orgId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(strip);
+}
+
+export async function getUseCase(id: string, orgId: string): Promise<UseCase | null> {
+  const u = useCases.get(id);
+  return u && u._orgId === orgId ? strip(u) : null;
 }
 
 /**
@@ -76,9 +134,9 @@ export async function getUseCase(id: string): Promise<UseCase | null> {
  * db/schema.sql: alert_rule.use_case_event_id cascades on delete, which is
  * why dropping an event silently removes any alert rules built on it.
  */
-export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseCase | null> {
+export async function saveUseCase(id: string, orgId: string, input: UseCaseInput): Promise<UseCase | null> {
   const existing = useCases.get(id);
-  if (!existing) return null;
+  if (!existing || existing._orgId !== orgId) return null;
 
   const byCode = new Map(existing.events.map((e) => [e.code, e]));
   const events = input.events.map((e) => ({
@@ -88,7 +146,7 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
     severity: e.severity,
   }));
 
-  const next: UseCase = {
+  const next: Tagged<UseCase> = {
     ...existing,
     name: input.name,
     icon: input.icon,
@@ -106,13 +164,13 @@ export async function saveUseCase(id: string, input: UseCaseInput): Promise<UseC
     updatedAt: new Date().toISOString(),
   };
   useCases.set(id, next);
-  return next;
+  return strip(next);
 }
 
-export async function createUseCase(input: UseCaseInput, _ctx: AuthContext): Promise<UseCase> {
+export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Promise<UseCase> {
   const id = `uc-${Math.random().toString(36).slice(2, 10)}`;
   const now = new Date().toISOString();
-  const uc: UseCase = {
+  const uc: Tagged<UseCase> = {
     id,
     slug: slugify(input.name),
     name: input.name,
@@ -138,31 +196,47 @@ export async function createUseCase(input: UseCaseInput, _ctx: AuthContext): Pro
     alertRuleCount: 0,
     lastRunAt: null,
     updatedAt: now,
+    _orgId: ctx.orgId,
   };
   useCases.set(id, uc);
-  return uc;
+  return strip(uc);
 }
 
 // ── sources ──────────────────────────────────────────────────────────────
-export async function listSources(): Promise<Source[]> {
-  return [...sources.values()];
+
+export async function listSources(orgId: string): Promise<Source[]> {
+  return [...sources.values()].filter((s) => s._orgId === orgId).map(strip);
 }
 
-export async function getSource(id: string): Promise<Source | null> {
-  return sources.get(id) ?? null;
+export async function getSource(id: string, orgId: string): Promise<Source | null> {
+  const s = sources.get(id);
+  return s && s._orgId === orgId ? strip(s) : null;
 }
 
 // ── runs ─────────────────────────────────────────────────────────────────
-export async function listRuns(): Promise<Run[]> {
-  return [...runs.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+export async function listRuns(orgId: string): Promise<Run[]> {
+  return [...runs.values()]
+    .filter((r) => r._orgId === orgId)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .map(strip);
 }
 
-export async function getRun(id: string): Promise<Run | null> {
-  return runs.get(id) ?? null;
+export async function getRun(id: string, orgId: string): Promise<Run | null> {
+  const r = runs.get(id);
+  return r && r._orgId === orgId ? strip(r) : null;
 }
 
+/**
+ * No orgId parameter, deliberately — mirrors postgres.ts. By the time a
+ * route can construct a Run, it already resolved useCaseId/sourceId through
+ * getUseCase()/getSource() scoped to the caller's org, so the org here is
+ * derived from the use case rather than trusted from the caller.
+ */
 export async function createRun(r: Run): Promise<Run> {
-  runs.set(r.id, r);
+  const owner = useCases.get(r.useCaseId);
+  const _orgId = owner?._orgId ?? 'unknown';
+  runs.set(r.id, { ...r, _orgId });
   return r;
 }
 
@@ -171,12 +245,10 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
   if (!cur) return null;
   const next = { ...cur, ...patch };
   runs.set(id, next);
-  return next;
+  return strip(next);
 }
 
 // ── incidents ────────────────────────────────────────────────────────────
-
-const incidents = new Map<string, Incident>();
 
 export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
   return [...incidents.values()]
@@ -221,7 +293,7 @@ export async function completeRunWithIncidents(
   if (!cur || cur.status !== 'processing') return null;
 
   // Single-threaded, so status flip and insert cannot interleave.
-  const next: Run = {
+  const next: Tagged<Run> = {
     ...cur,
     status: 'complete',
     analysisPercent: 100,
@@ -231,5 +303,5 @@ export async function completeRunWithIncidents(
   };
   runs.set(id, next);
   await createIncidents(items.map((i) => ({ ...i, runId: id })));
-  return next;
+  return strip(next);
 }

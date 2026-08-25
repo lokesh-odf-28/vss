@@ -1,13 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getUseCase, listSources } from '@/lib/store';
+import { currentUser } from '@/lib/auth';
 import RunLauncher from '@/components/RunLauncher';
 
 export const dynamic = 'force-dynamic';
 
 /** C3 — Launch a run: use case + mode + source. */
 export default async function RunLaunchPage({ params }: { params: { id: string } }) {
-  const [useCase, sources] = await Promise.all([getUseCase(params.id), listSources()]);
+  const user = (await currentUser())!;
+  const [useCase, sources] = await Promise.all([
+    getUseCase(params.id, user.orgId),
+    listSources(user.orgId),
+  ]);
   if (!useCase) notFound();
 
   return (

@@ -191,6 +191,23 @@ CREATE INDEX incident_source_time_idx ON incident(source_id, started_at DESC);
 CREATE INDEX incident_run_idx         ON incident(run_id);
 CREATE INDEX incident_verdict_idx     ON incident(verdict, severity);
 
+-- ── otp challenges ───────────────────────────────────────────────────────
+-- See db/migrations/002_otp_challenge.sql for the full rationale.
+CREATE TABLE otp_challenge (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purpose       text NOT NULL CHECK (purpose IN ('signup', 'reset')),
+  email         text NOT NULL,
+  otp_hash      text NOT NULL,
+  org_name      text,
+  name          text,
+  password_hash text,
+  user_id       uuid REFERENCES app_user(id) ON DELETE CASCADE,
+  attempts      int NOT NULL DEFAULT 0,
+  expires_at    timestamptz NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (email, purpose)
+);
+
 -- ── reports ──────────────────────────────────────────────────────────────
 
 CREATE TABLE report (

@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listRuns, createRun, getUseCase, getSource } from '@/lib/store';
+import { requireUser, UnauthorizedError } from '@/lib/auth';
 import { vss } from '@/lib/vss';
 import type { Run, RunMode } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return NextResponse.json({ data: await listRuns() });
+  try {
+    const ctx = await requireUser();
+    return NextResponse.json({ data: await listRuns(ctx.orgId) });
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    throw e;
+  }
 }
 
 /**
@@ -16,11 +23,21 @@ export async function GET() {
  * resulting sensor id — this route does NOT receive the file. It only hands
  * LVS the prompts from the selected use case and records the job.
  *
- * These guards are duplicated in the C3 UI, but they live here too: the UI
- * can be bypassed, and a live run against an offline camera would otherwise
- * fail deep inside VSS with a much worse error.
+ * getUseCase/getSource below are org-scoped, so a useCaseId or sourceId that
+ * belongs to a different organization comes back null and hits the same
+ * "unknown use case"/"unknown source" 400 as one that does not exist —
+ * that is also what stops a run ever being created against another org's
+ * camera or use case, not a separate check.
  */
 export async function POST(req: NextRequest) {
+  let ctx;
+  try {
+    ctx = await requireUser();
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    throw e;
+  }
+
   const { useCaseId, sourceId, mode } = (await req.json()) as {
     useCaseId?: string; sourceId?: string; mode?: RunMode;
   };
@@ -30,8 +47,8 @@ export async function POST(req: NextRequest) {
   }
 
   const [useCase, source] = await Promise.all([
-    getUseCase(useCaseId ?? ''),
-    getSource(sourceId ?? ''),
+    getUseCase(useCaseId ?? '', ctx.orgId),
+    getSource(sourceId ?? '', ctx.orgId),
   ]);
   if (!useCase) return NextResponse.json({ error: 'unknown use case' }, { status: 400 });
   if (!source) return NextResponse.json({ error: 'unknown source' }, { status: 400 });

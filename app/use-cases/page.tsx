@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { listUseCases } from '@/lib/store';
+import { currentUser } from '@/lib/auth';
 import RunButton from '@/components/RunButton';
 
 export const dynamic = 'force-dynamic';
 
 /** C1 — Use Case Library. The home screen. Design doc §6. */
 export default async function UseCasesPage() {
-  const useCases = await listUseCases();
+  const user = (await currentUser())!;  // middleware already guarantees a session
+  const useCases = await listUseCases(user.orgId);
 
   return (
     <div className="p-6">

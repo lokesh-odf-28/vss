@@ -108,6 +108,29 @@ export interface SignUpInput {
   passwordHash: string;
 }
 
+export type OtpPurpose = 'signup' | 'reset';
+
+export interface CreateOtpChallengeInput {
+  purpose: OtpPurpose;
+  email: string;
+  otpHash: string;
+  expiresAt: string; // ISO
+  orgName?: string;      // signup only
+  name?: string;         // signup only
+  passwordHash?: string; // signup only — already hashed at issue time
+  userId?: string;       // reset only
+}
+
+export interface OtpChallengeRow {
+  otpHash: string;
+  attempts: number;
+  expiresAt: string;
+  orgName?: string;
+  name?: string;
+  passwordHash?: string;
+  userId?: string;
+}
+
 export interface Source {
   id: string;
   name: string;

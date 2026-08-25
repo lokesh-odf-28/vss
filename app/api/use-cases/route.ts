@@ -6,7 +6,13 @@ import type { UseCaseInput } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return NextResponse.json({ data: await listUseCases() });
+  try {
+    const ctx = await requireUser();
+    return NextResponse.json({ data: await listUseCases(ctx.orgId) });
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    throw e;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -33,7 +39,6 @@ export async function POST(req: NextRequest) {
     const created = await createUseCase(input, ctx);
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (e: any) {
-    // unique_violation on (org_id, slug) — same name already used
     if (e?.code === '23505') {
       return NextResponse.json(
         { error: 'A use case with a similar name already exists' },

@@ -50,7 +50,10 @@ export default function SignInForm({ next }: { next?: string }) {
         />
       </div>
       <div>
-        <label htmlFor="password" className="block text-xs font-semibold mb-1">Password</label>
+        <div className="flex items-center justify-between mb-1">
+          <label htmlFor="password" className="block text-xs font-semibold">Password</label>
+          <a href="/forgot-password" className="text-[11px] text-blue-700 dark:text-blue-400 font-medium">Forgot password?</a>
+        </div>
         <input
           id="password" type="password" autoComplete="current-password" required
           value={password} onChange={(e) => setPassword(e.target.value)}
@@ -63,9 +66,6 @@ export default function SignInForm({ next }: { next?: string }) {
       >
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
-      <p className="text-[11px] text-neutral-400 pt-1">
-         Password reset and invites come later.
-      </p>
     </form>
   );
 }
