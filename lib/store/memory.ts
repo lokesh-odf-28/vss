@@ -23,16 +23,41 @@ import { seedUseCases, seedSources } from '../seed';
 const DEV_ORG_ID = 'org-dev';
 
 type Tagged<T> = T & { _orgId: string };
+type OtpChallengeEntry = OtpChallengeRow & { purpose: OtpPurpose };
 
-const useCases = new Map<string, Tagged<UseCase>>(
-  seedUseCases.map((u) => [u.id, { ...u, _orgId: DEV_ORG_ID }]),
-);
-const sources = new Map<string, Tagged<Source>>(
-  seedSources.map((s) => [s.id, { ...s, _orgId: DEV_ORG_ID }]),
-);
-const runs = new Map<string, Tagged<Run>>();
-const incidents = new Map<string, Incident>();
-const otpChallenges = new Map<string, OtpChallengeRow & { purpose: OtpPurpose }>();
+/**
+ * Cached on globalThis, same reasoning as lib/db.ts's pool and
+ * lib/vss/mock.ts's job map: Next's dev server does not reliably share a
+ * module's top-level state between different route handler files, so
+ * without this, e.g. a use case created via one route can be invisible to a
+ * read from another. Harmless in production (module state doesn't fragment
+ * there) but this store only exists for zero-setup dev in the first place.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __vi_mem_state: {
+    useCases: Map<string, Tagged<UseCase>>;
+    sources: Map<string, Tagged<Source>>;
+    runs: Map<string, Tagged<Run>>;
+    incidents: Map<string, Incident>;
+    otpChallenges: Map<string, OtpChallengeEntry>;
+    users: Map<string, UserWithSecret>;
+  } | undefined;
+}
+
+const memState = globalThis.__vi_mem_state ?? (globalThis.__vi_mem_state = {
+  useCases: new Map<string, Tagged<UseCase>>(
+    seedUseCases.map((u) => [u.id, { ...u, _orgId: DEV_ORG_ID }]),
+  ),
+  sources: new Map<string, Tagged<Source>>(
+    seedSources.map((s) => [s.id, { ...s, _orgId: DEV_ORG_ID }]),
+  ),
+  runs: new Map<string, Tagged<Run>>(),
+  incidents: new Map<string, Incident>(),
+  otpChallenges: new Map<string, OtpChallengeEntry>(),
+  users: new Map<string, UserWithSecret>(),
+});
+const { useCases, sources, runs, incidents, otpChallenges } = memState;
 const otpKey = (purpose: OtpPurpose, email: string) => `${purpose}:${email.toLowerCase()}`;
 
 function strip<T extends { _orgId: string }>({ _orgId, ...rest }: T): Omit<T, '_orgId'> {
@@ -52,7 +77,8 @@ const devUser: UserWithSecret = {
   passwordHash:
     'scrypt$tp+Go5jk7omgbcn1Dj5tkw==$+83kJbhqabMOLfygc1/QknLE1R5SErNYo6Z6mt95sXthqz5KRsdR8XJaIZ/pU/rTzgPT+5xVxQ2UCo+fuDSkIQ==',
 };
-const users = new Map<string, UserWithSecret>([[devUser.id, devUser]]);
+const users = memState.users;
+if (!users.has(devUser.id)) users.set(devUser.id, devUser);
 
 export async function getUserByEmail(email: string): Promise<UserWithSecret | null> {
   const lower = email.toLowerCase();
@@ -211,6 +237,18 @@ export async function listSources(orgId: string): Promise<Source[]> {
 export async function getSource(id: string, orgId: string): Promise<Source | null> {
   const s = sources.get(id);
   return s && s._orgId === orgId ? strip(s) : null;
+}
+
+/** Mirrors postgres.ts: registers an "upload" source with no real VST behind it. */
+export async function createSource(orgId: string, name: string): Promise<Source> {
+  const id = `src-${Math.random().toString(36).slice(2, 10)}`;
+  const s: Tagged<Source> = {
+    id, name, kind: 'upload', status: 'online',
+    vstSensorId: `mock-upload-${Math.random().toString(36).slice(2, 10)}`,
+    _orgId: orgId,
+  };
+  sources.set(id, s);
+  return strip(s);
 }
 
 // ── runs ─────────────────────────────────────────────────────────────────

@@ -63,11 +63,19 @@ export default function UseCaseForm({ existing }: { existing?: UseCase }) {
     setSaving(true);
     setError(null);
     try {
+      // A row left over from an unused "add event" click has no label and
+      // no code — drop it rather than making the user delete it by hand or
+      // bouncing off the server's "every event needs a name" check for
+      // something they never meant to fill in.
+      const payload: UseCaseInput = {
+        ...form,
+        events: form.events.filter((e) => e.label.trim() || e.code.trim()),
+      };
       const url = existing ? `/api/use-cases/${existing.id}` : '/api/use-cases';
       const res = await fetch(url, {
         method: existing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'save failed');

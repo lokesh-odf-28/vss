@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getRun, listIncidentsByRun } from '@/lib/store';
 import { currentUser } from '@/lib/auth';
 import IncidentTimeline from '@/components/IncidentTimeline';
@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 
 /** C5 — Results. The timeline is the hero, not the player. Design doc §6. */
 export default async function RunDetailPage({ params }: { params: { id: string } }) {
-  const user = (await currentUser())!;
+  const user = await currentUser();
+  if (!user) redirect('/signin');
   const run = await getRun(params.id, user.orgId);
   if (!run) notFound();
 

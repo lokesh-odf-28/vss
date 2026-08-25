@@ -34,6 +34,19 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (!input.supportsRecorded && !input.supportsLive) {
     return NextResponse.json({ error: 'must support at least one mode' }, { status: 400 });
   }
+  if (input.events.some((e) => !e.code.trim() || !e.label.trim())) {
+    return NextResponse.json({ error: 'Every event needs a name — remove any empty rows' }, { status: 400 });
+  }
+  const seenCodes = new Set<string>();
+  for (const e of input.events) {
+    if (seenCodes.has(e.code)) {
+      return NextResponse.json(
+        { error: `Two events both resolve to "${e.code}" — make their names distinct` },
+        { status: 400 },
+      );
+    }
+    seenCodes.add(e.code);
+  }
 
   // Same response whether the id belongs to someone else's org or does not
   // exist at all — an id must not be usable to probe what other

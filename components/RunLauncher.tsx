@@ -27,6 +27,9 @@ export default function RunLauncher({
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceList, setSourceList] = useState<Source[]>(sources);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   /** Live needs an online camera; recorded can use any source. */
   function eligible(s: Source): boolean {
@@ -34,9 +37,35 @@ export default function RunLauncher({
     return true;
   }
 
-  const selected = sources.find((s) => s.id === sourceId) ?? null;
+  const selected = sourceList.find((s) => s.id === sourceId) ?? null;
   const canStart = Boolean(selected && eligible(selected)) && !busy
     && (mode === 'recorded' ? useCase.supportsRecorded : useCase.supportsLive && LIVE_AVAILABLE);
+
+  /**
+   * No real VST is deployed yet, so this doesn't send bytes anywhere — it
+   * just registers a source from the picked file's name so recorded runs
+   * have something real (chosen in the browser, not a seed fixture) to
+   * point the mock VSS client at. See lib/store's createSource.
+   */
+  async function addUploadSource(file: File) {
+    setUploadBusy(true);
+    setUploadError(null);
+    try {
+      const res = await fetch('/api/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'could not add source');
+      setSourceList((prev) => [...prev, body.data]);
+      setSourceId(body.data.id);
+    } catch (e) {
+      setUploadError((e as Error).message);
+    } finally {
+      setUploadBusy(false);
+    }
+  }
 
   async function start() {
     if (!sourceId) return;
@@ -93,14 +122,35 @@ export default function RunLauncher({
 
       {/* ── source ───────────────────────────────────────────────────── */}
       <p className="text-xs font-semibold mb-2">Source</p>
-      {sources.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-8 text-center">
+      {sourceList.length === 0 && (
+        <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-8 text-center mb-3">
           <p className="text-sm text-neutral-500">No sources yet.</p>
-          <p className="text-xs text-neutral-400 mt-1 font-mono">TODO: B3 — add a camera or upload a video</p>
         </div>
-      ) : (
+      )}
+      {mode === 'recorded' && (
+        <div className="mb-3">
+          <label className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-800 px-3.5 py-2.5 text-sm cursor-pointer hover:border-neutral-400">
+            <span>📁</span>
+            <span className="font-medium">{uploadBusy ? 'Adding…' : 'Upload a video'}</span>
+            <input
+              type="file" accept="video/*" className="hidden" disabled={uploadBusy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) addUploadSource(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <p className="text-[11px] text-neutral-400 mt-1">
+            No VST deployment is connected yet, so this registers the file as a
+            source for the mock backend — no bytes leave your browser.
+          </p>
+          {uploadError && <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">{uploadError}</p>}
+        </div>
+      )}
+      {sourceList.length > 0 && (
         <div className="space-y-1.5 mb-6">
-          {sources.map((s) => {
+          {sourceList.map((s) => {
             const ok = eligible(s);
             return (
               <button

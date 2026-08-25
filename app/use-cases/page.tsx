@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { listUseCases } from '@/lib/store';
 import { currentUser } from '@/lib/auth';
 import RunButton from '@/components/RunButton';
@@ -7,7 +8,11 @@ export const dynamic = 'force-dynamic';
 
 /** C1 — Use Case Library. The home screen. Design doc §6. */
 export default async function UseCasesPage() {
-  const user = (await currentUser())!;  // middleware already guarantees a session
+  // Middleware only checks the cookie's signature, not whether the user it
+  // names still exists — a stale session (e.g. after the DB was reset) needs
+  // to be bounced to sign-in here, not crash on a null dereference.
+  const user = await currentUser();
+  if (!user) redirect('/signin');
   const useCases = await listUseCases(user.orgId);
 
   return (

@@ -308,6 +308,38 @@ export async function getSource(id: string, orgId: string): Promise<Source | nul
   return { id: r.id, name: r.name, kind: r.kind, status: r.status, vstSensorId: r.vst_sensor_id ?? undefined };
 }
 
+/**
+ * Registers an "upload" source without a real VST deployment behind it —
+ * no bytes are sent anywhere, only the file's name is recorded. Lets the
+ * recorded-mode flow (C3 → C4a → C5) be exercised end to end against the
+ * mock VSS client before real VST upload exists. Swap point: once VST is
+ * live, this is where the returned vst_sensor_id would come from the real
+ * upload response instead of being invented here.
+ *
+ * There is no site-management UI (org = user, one implicit site), so the
+ * org's first source lazily creates its one site rather than requiring a
+ * setup step.
+ */
+export async function createSource(orgId: string, name: string): Promise<Source> {
+  return withTransaction(async (tx) => {
+    const existing = await tx<{ id: string }>(`SELECT id FROM site WHERE org_id = $1 LIMIT 1`, [orgId]);
+    const siteId = existing.length
+      ? existing[0].id
+      : (await tx<{ id: string }>(
+          `INSERT INTO site (org_id, name) VALUES ($1, 'Default Site') RETURNING id`,
+          [orgId],
+        ))[0].id;
+
+    const rows = await tx(
+      `INSERT INTO source (site_id, name, kind, vst_sensor_id, status)
+       VALUES ($1, $2, 'upload', $3, 'online') RETURNING *`,
+      [siteId, name, `mock-upload-${crypto.randomUUID()}`],
+    );
+    const r = rows[0];
+    return { id: r.id, name: r.name, kind: r.kind, status: r.status, vstSensorId: r.vst_sensor_id ?? undefined };
+  });
+}
+
 // ── runs ─────────────────────────────────────────────────────────────────
 
 async function getRunRaw(id: string): Promise<Run | null> {

@@ -20,6 +20,7 @@ export const saveUseCase   = impl.saveUseCase;
 export const createUseCase = impl.createUseCase;
 export const listSources  = impl.listSources;
 export const getSource    = impl.getSource;
+export const createSource = impl.createSource;
 export const listRuns     = impl.listRuns;
 export const getRun       = impl.getRun;
 export const createRun    = impl.createRun;

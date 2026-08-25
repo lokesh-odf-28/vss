@@ -34,6 +34,23 @@ export async function POST(req: NextRequest) {
   if (!input.supportsRecorded && !input.supportsLive) {
     return NextResponse.json({ error: 'must support at least one mode' }, { status: 400 });
   }
+  // Catches an abandoned "add event" click before it reaches the DB — an
+  // empty or duplicate code would otherwise surface as a raw unique-
+  // constraint violation, which the catch below can't tell apart from an
+  // actual name conflict.
+  if (input.events.some((e) => !e.code.trim() || !e.label.trim())) {
+    return NextResponse.json({ error: 'Every event needs a name — remove any empty rows' }, { status: 400 });
+  }
+  const seenCodes = new Set<string>();
+  for (const e of input.events) {
+    if (seenCodes.has(e.code)) {
+      return NextResponse.json(
+        { error: `Two events both resolve to "${e.code}" — make their names distinct` },
+        { status: 400 },
+      );
+    }
+    seenCodes.add(e.code);
+  }
 
   try {
     const created = await createUseCase(input, ctx);

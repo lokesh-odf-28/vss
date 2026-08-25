@@ -22,9 +22,36 @@ const MOCK_JOB_SECONDS = Number(process.env.MOCK_JOB_SECONDS ?? 20);
 
 // ── recorded ─────────────────────────────────────────────────────────────
 
-const jobs = new Map<string, {
-  startedAt: number; videoId: string; prompt: string; incidents: IncidentDraft[];
-}>();
+type MockJob = { startedAt: number; videoId: string; prompt: string; incidents: IncidentDraft[] };
+interface LiveStream {
+  streamId: string;
+  cameraId: string;
+  cameraUrl: string;
+  captioning: boolean;
+  scenario?: string;
+  events: string[];
+  objects: string[];
+  captioningStartedAt: number;
+  stopped: boolean;
+}
+
+/**
+ * Cached on globalThis, same reasoning as lib/db.ts's pool: Next's dev
+ * server does not reliably share a module's top-level state between
+ * different route handler files (submit runs in app/api/runs, polls from
+ * app/api/runs/[id]) — without this, a job created by one request can be
+ * invisible to the very next poll. Production builds don't have this
+ * problem, but dev does, and that's exactly where this mock gets exercised.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __vi_mock_state: { jobs: Map<string, MockJob>; liveStreams: Map<string, LiveStream> } | undefined;
+}
+const mockState = globalThis.__vi_mock_state ?? (globalThis.__vi_mock_state = {
+  jobs: new Map<string, MockJob>(),
+  liveStreams: new Map<string, LiveStream>(),
+});
+const jobs = mockState.jobs;
 
 const CANNED_SUMMARY = `Across the analysed footage, three high-severity events occurred, all between 06:40 and 09:05. Two involved a forklift operating within 1.5 m of an unprotected worker near Bay 4. Pallet stacking obstructed emergency exit E2 for approximately 22 minutes. PPE compliance was otherwise consistent throughout the shift.`;
 
@@ -75,19 +102,7 @@ function generateIncidents(req: SummarizeRequest): IncidentDraft[] {
 
 // ── live ─────────────────────────────────────────────────────────────────
 
-interface LiveStream {
-  streamId: string;
-  cameraId: string;
-  cameraUrl: string;
-  captioning: boolean;
-  scenario?: string;
-  events: string[];
-  objects: string[];
-  captioningStartedAt: number;
-  stopped: boolean;
-}
-
-const liveStreams = new Map<string, LiveStream>();
+const liveStreams = mockState.liveStreams;
 
 function liveSummaryText(stream: LiveStream, elapsedSec: number): string {
   const minutes = Math.max(1, Math.round(elapsedSec / 60));

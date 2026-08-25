@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getUseCase } from '@/lib/store';
 import { currentUser } from '@/lib/auth';
 import UseCaseForm from '@/components/UseCaseForm';
@@ -6,7 +6,8 @@ import UseCaseForm from '@/components/UseCaseForm';
 export const dynamic = 'force-dynamic';
 
 export default async function EditUseCasePage({ params }: { params: { id: string } }) {
-  const user = (await currentUser())!;
+  const user = await currentUser();
+  if (!user) redirect('/signin');
   const uc = await getUseCase(params.id, user.orgId);
   if (!uc) notFound();
 
