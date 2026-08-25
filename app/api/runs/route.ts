@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
       system_prompt: useCase.recordedSystemPrompt,
       scenario: useCase.scenario,
       objects_of_interest: useCase.objectsOfInterest,
-      event_types: useCase.events.map((e) => e.code),
+      events: useCase.events.map((e) => e.code),
     });
     externalJobId = accepted.id;
   } catch (e) {

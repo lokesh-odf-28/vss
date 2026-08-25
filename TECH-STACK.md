@@ -19,10 +19,11 @@ rather than inherit them blindly.
 | Database | PostgreSQL | 18 |
 | DB driver | `pg` | 8.12.0 |
 | Auth | Hand-rolled — `node:crypto` + Web Crypto | stdlib |
+| Email | Nodemailer (SMTP) | 9.0.5 |
 | AI engine | NVIDIA VSS *(external)* | — |
 
-**Total runtime dependencies: four.** `next`, `react`, `react-dom`, `pg`.
-That is deliberate — see [§9](#9-what-we-deliberately-did-not-add).
+**Total runtime dependencies: five.** `next`, `react`, `react-dom`, `pg`,
+`nodemailer`. That is deliberate — see [§9](#9-what-we-deliberately-did-not-add).
 
 ---
 
@@ -121,11 +122,13 @@ on the machine. `docker-compose.optional.yml` remains for anyone who prefers it.
 The most questionable choice in the stack, so here is the full reasoning.
 
 **What was built:** scrypt password hashing, an HMAC-signed session cookie, edge
-middleware gating every route.
+middleware gating every route, two-step OTP-verified sign-up, and OTP-based
+forgot/reset password. One `otp_challenge` table backs both OTP flows
+(`purpose: 'signup' | 'reset'`) rather than two near-identical tables.
 
 **Why not NextAuth / Auth.js / Clerk / Supabase Auth:**
 
-- **The requirement is genuinely small.** Seeded accounts, email + password, one session. No OAuth, no magic links, no social login. NextAuth is ~40 % of the app's dependency weight to solve a problem that is ~150 lines.
+- **The requirement is genuinely small.** Email + password, one session, no OAuth, no magic links, no social login. NextAuth is a lot of dependency weight to solve a problem that is a few hundred lines.
 - **We already own the users table.** `app_user` exists with roles and status. Most auth libraries want to own that schema, which means either adopting theirs or writing an adapter.
 - **The eventual target is Cognito.** `IOT-frontend` uses a five-state Cognito flow. Adding NextAuth now means migrating off it later — two migrations instead of one.
 
@@ -133,15 +136,20 @@ middleware gating every route.
 
 | Choice | Reason |
 |---|---|
-| **scrypt** (not bcrypt) | In node's stdlib — no native module to compile. Memory-hard, so resists GPU cracking better than PBKDF2. |
+| **scrypt** (not bcrypt) | In node's stdlib — no native module to compile. Memory-hard, so resists GPU cracking better than PBKDF2. Also used to hash OTP codes — same primitive, one fewer thing to reason about. |
 | **Web Crypto** for session signing (not `node:crypto`) | The *same code* must run in edge middleware and node handlers. `node:crypto` would crash on edge. |
 | **Expiry inside the signed payload** | Cannot be extended client-side. Verified by test. |
 | **`timingSafeEqual`** | Constant-time comparison; a length mismatch must not short-circuit early. |
 | **Identical error for unknown email / wrong password / disabled** | Otherwise login becomes an account-enumeration oracle. |
+| **6-digit OTP codes, not clickable email links** | Email scanners / link-preview bots pre-fetch links, which would burn a single-use reset token before the human ever clicks it. A code typed back into the app has no such failure mode. |
+| **OTP hashed, never stored in plaintext, 10-minute TTL, 5-attempt cap** | Same reasoning as passwords — a leaked `otp_challenge` row should not be directly usable, and unlimited guesses would make a 6-digit code brute-forceable. |
 
-**What is deliberately missing:** sign-up, password reset, invites, OTP, forced
-password change, session revocation. That is the full IOT-frontend flow and it
-is a lot of screens for a first cut.
+**"Organization = user":** one `app_user` row per `organization`, created
+atomically in the same transaction on sign-up. No invite flow, no team
+members, no roles beyond the single owner — this is a permanent product
+decision, not a phase-one simplification. Every org-scoped read/write filters
+by the `orgId` derived from the session, never from client input; a row
+belonging to another org 404s rather than 403s, so existence cannot be probed.
 
 > ⚠️ **Before anything public-facing:** the dev password hash is committed in
 > `db/seed.sql` so a fresh `npm run db:setup` produces a working login. Correct
@@ -163,28 +171,44 @@ codebase we extend.
 
 | Service | Purpose |
 |---|---|
-| **LVS** (`video-summarization`) | `/v1/summarize`, `/v1/stream_summarize` |
+| **LVS** (`video-summarization`) | `/v1/summarize` + poll (recorded), `/v1/generate_captions` + `/v1/stream_summarize` (live) |
 | **VST / VIOS** | Video storage, chunked upload |
-| **RTVI** | Real-time inference *(live mode — not wired yet)* |
+| **RTVI** (`rt-vlm`) | Live camera registration (`/v1/stream/add`) and teardown — a separate microservice from LVS, not an alternate name for it |
 | **Elasticsearch / Milvus** | VSS-side storage for captions and search |
+| **Alert Bridge** | Real-time alerting — its own deployed profile, not yet integrated *(deferred, see [ARCHITECTURE.md](./ARCHITECTURE.md))* |
+
+**Recorded and live are genuinely different API shapes, not one endpoint with
+a flag.** Recorded (`/v1/summarize`) is async job+poll. Live is a two-call,
+two-service handshake: register the camera with RTVI, start captioning on LVS,
+then repeatedly call `/v1/stream_summarize` on LVS, which blocks and always
+returns `summarization.completion` — there is no live equivalent of
+`summarization.progressing`. Getting this shape wrong before writing code
+would have meant building against an imagined SSE stream that does not exist.
 
 **Wire types are copied from the OpenAPI spec, not invented.**
 `lib/vss/types.ts` mirrors `services/video-summarization/api_spec/openapi.json`.
-That is where `summarization.progressing` came from — the field that signals
-async completion and drives the two-phase progress UI.
+That is where `summarization.progressing` came from, and where the request
+field is confirmed to be `events` (not `event_types` — an earlier version of
+this codebase had that wrong on both the recorded and live paths).
 
 ---
 
 ## 8. The mock layer — the most important decision
 
-`lib/vss/mock.ts` returns the **real** `CompletionResponse` shape, including the
-`progressing → completion` transition and realistic timing.
+`lib/vss/mock.ts` returns the **real** `CompletionResponse` shape for both
+paths: the `progressing → completion` transition with realistic timing for
+recorded runs, and a stateful live-stream simulation (register → start
+captioning → repeated `stream_summarize` polls with a summary that visibly
+grows as simulated time passes → stop) that mirrors the real service's error
+behavior — calling `stream_summarize` before registering, or after stopping,
+throws the same way the real services would.
 
 **Why this shaped everything:** VSS needs a GPU, an NGC key, and a multi-service
 Docker stack. Waiting for that would have blocked *all* UI work for weeks.
 
-With the mock, the entire first cut — C1, C2, C3, C4a, C5, auth — was built and
-tested on a laptop with **no GPU**. When real VSS lands:
+With the mock, the entire first cut — C1, C2, C3, C4a, C5, auth, and the live
+client layer — was built and tested on a laptop with **no GPU**. When real VSS
+lands:
 
 ```diff
 - USE_MOCK_VSS=true
@@ -201,12 +225,26 @@ detections that were never reported.
 
 ---
 
+## 8a. The mail layer — the same pattern, a third time
+
+`lib/mail/index.ts` switches on `SMTP_HOST`: unset → `console.ts` (OTP codes
+land in the server log, zero setup), set → `smtp.ts` (real send via
+Nodemailer). Nothing that calls `mailer.send()` — `issueOtp()` in particular —
+knows or cares which is active.
+
+**Why Nodemailer and not a provider SDK (SendGrid, SES SDK, Postmark):**
+generic SMTP works with Gmail, Office 365, or any provider's SMTP interface —
+including Amazon SES, which exposes one — so switching providers later is a
+credentials change, not a code change.
+
+---
+
 ## 9. What we deliberately did *not* add
 
 | Not used | Why not | Revisit when |
 |---|---|---|
 | ORM (Prisma/Drizzle) | Schema is the design doc; queries are simple | Schema doubles |
-| NextAuth / Clerk | Requirement is 150 lines; Cognito is the real target | Adopting OAuth/SSO |
+| NextAuth / Clerk | Requirement (incl. OTP sign-up/reset) is a few hundred lines; Cognito is the real target | Adopting OAuth/SSO |
 | Redux / Zustand | Server components + `useState` cover it | Genuine cross-page client state |
 | SWR / React Query | One polling loop, ~20 lines | Several polling surfaces |
 | Component library | No design system to conform to yet | A designer defines one |
