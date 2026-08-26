@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listRuns, createRun, getUseCase, getSource } from '@/lib/store';
 import { requireUser, UnauthorizedError } from '@/lib/auth';
-import { vss } from '@/lib/vss';
+import { vss, vssMode } from '@/lib/vss';
 import type { Run, RunMode } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -68,6 +68,17 @@ export async function POST(req: NextRequest) {
   if (mode === 'live' && source.status !== 'online') {
     return NextResponse.json(
       { error: `${source.name} is ${source.status} — live monitoring needs an online camera` },
+      { status: 400 });
+  }
+  // The UI already greys these out (see RunLauncher's hasRealFile), but that
+  // is only a client-side nicety — a stale tab or a direct request can still
+  // reach here. Without this, lib/vss/nvidiaHosted.ts would hand the fake
+  // "mock-upload-*" placeholder to ffprobe and fail with a confusing
+  // shell-level error instead of an actionable one.
+  if (mode === 'recorded' && vssMode === 'nvidia-hosted' && source.kind === 'upload'
+      && (!source.vstSensorId || source.vstSensorId.startsWith('mock-upload-'))) {
+    return NextResponse.json(
+      { error: `"${source.name}" has no real file on disk — registered before nvidia-hosted mode was on. Upload it again.` },
       { status: 400 });
   }
 

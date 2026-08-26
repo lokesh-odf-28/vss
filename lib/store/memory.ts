@@ -239,12 +239,12 @@ export async function getSource(id: string, orgId: string): Promise<Source | nul
   return s && s._orgId === orgId ? strip(s) : null;
 }
 
-/** Mirrors postgres.ts: registers an "upload" source with no real VST behind it. */
-export async function createSource(orgId: string, name: string): Promise<Source> {
+/** Mirrors postgres.ts. Pass vstSensorId when there's a real file behind this source. */
+export async function createSource(orgId: string, name: string, vstSensorId?: string): Promise<Source> {
   const id = `src-${Math.random().toString(36).slice(2, 10)}`;
   const s: Tagged<Source> = {
     id, name, kind: 'upload', status: 'online',
-    vstSensorId: `mock-upload-${Math.random().toString(36).slice(2, 10)}`,
+    vstSensorId: vstSensorId ?? `mock-upload-${Math.random().toString(36).slice(2, 10)}`,
     _orgId: orgId,
   };
   sources.set(id, s);

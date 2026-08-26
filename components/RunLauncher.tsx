@@ -31,9 +31,24 @@ export default function RunLauncher({
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  /** Live needs an online camera; recorded can use any source. */
+  const isNvidiaHosted = process.env.NEXT_PUBLIC_VSS_MODE === 'nvidia-hosted';
+
+  /**
+   * In nvidia-hosted mode, lib/vss/nvidiaHosted.ts reads the video straight
+   * off disk using vstSensorId as the file path — a source registered
+   * before switching into this mode only has the mock's fake
+   * "mock-upload-*" placeholder there, not a real file. Picking one fails
+   * with a real but confusing ffprobe error, so filter it out here instead.
+   */
+  function hasRealFile(s: Source): boolean {
+    return Boolean(s.vstSensorId) && !s.vstSensorId!.startsWith('mock-upload-');
+  }
+
+  /** Live needs an online camera; recorded can use any source, except in
+   * nvidia-hosted mode where it needs a source with a real file on disk. */
   function eligible(s: Source): boolean {
     if (mode === 'live') return s.kind === 'camera' && s.status === 'online';
+    if (isNvidiaHosted && s.kind === 'upload') return hasRealFile(s);
     return true;
   }
 
@@ -42,20 +57,32 @@ export default function RunLauncher({
     && (mode === 'recorded' ? useCase.supportsRecorded : useCase.supportsLive && LIVE_AVAILABLE);
 
   /**
-   * No real VST is deployed yet, so this doesn't send bytes anywhere — it
-   * just registers a source from the picked file's name so recorded runs
-   * have something real (chosen in the browser, not a seed fixture) to
-   * point the mock VSS client at. See lib/store's createSource.
+   * In nvidia-hosted mode the file's actual bytes are sent to
+   * /api/sources/upload and saved server-side, so lib/vss/nvidiaHosted.ts
+   * has something real to extract frames from. Otherwise (mock, or real VSS
+   * without a VST deployment) only the filename is registered — see
+   * lib/store's createSource.
    */
   async function addUploadSource(file: File) {
     setUploadBusy(true);
     setUploadError(null);
     try {
-      const res = await fetch('/api/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name }),
-      });
+      const useRealUpload = process.env.NEXT_PUBLIC_VSS_MODE === 'nvidia-hosted';
+      const res = useRealUpload
+        ? await fetch('/api/sources/upload', {
+            method: 'POST',
+            body: (() => {
+              const form = new FormData();
+              form.set('file', file);
+              form.set('name', file.name);
+              return form;
+            })(),
+          })
+        : await fetch('/api/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: file.name }),
+          });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'could not add source');
       setSourceList((prev) => [...prev, body.data]);
@@ -142,8 +169,9 @@ export default function RunLauncher({
             />
           </label>
           <p className="text-[11px] text-neutral-400 mt-1">
-            No VST deployment is connected yet, so this registers the file as a
-            source for the mock backend — no bytes leave your browser.
+            {process.env.NEXT_PUBLIC_VSS_MODE === 'nvidia-hosted'
+              ? 'Uploads the real file for analysis by a real NVIDIA-hosted model — no VSS deployment involved.'
+              : 'No VST deployment is connected yet, so this registers the file as a source for the mock backend — no bytes leave your browser.'}
           </p>
           {uploadError && <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">{uploadError}</p>}
         </div>
@@ -157,6 +185,9 @@ export default function RunLauncher({
                 key={s.id}
                 type="button"
                 disabled={!ok}
+                title={!ok && isNvidiaHosted && !hasRealFile(s)
+                  ? 'Registered before nvidia-hosted mode was on — no real file on disk. Re-upload it.'
+                  : undefined}
                 onClick={() => setSourceId(s.id)}
                 className={`w-full flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-left transition-colors ${
                   sourceId === s.id
@@ -176,6 +207,11 @@ export default function RunLauncher({
           {mode === 'live' && (
             <p className="text-[11px] text-neutral-400 pt-1">
               Live monitoring needs an online camera — uploaded files and offline cameras are unavailable.
+            </p>
+          )}
+          {mode === 'recorded' && isNvidiaHosted && sourceList.some((s) => s.kind === 'upload' && !hasRealFile(s)) && (
+            <p className="text-[11px] text-neutral-400 pt-1">
+              Greyed-out sources were registered before nvidia-hosted mode was on and have no real file on disk — upload again to use them here.
             </p>
           )}
         </div>

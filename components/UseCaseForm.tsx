@@ -367,7 +367,7 @@ function EventEditor({
       {events.map((e, i) => (
         <div key={e.id ?? `new-${i}`} className="flex items-center gap-1.5">
           <input
-            className="input flex-1"
+            className="input flex-1 w-0"
             value={e.label}
             placeholder="e.g. Forklift near worker"
             onChange={(ev) => {

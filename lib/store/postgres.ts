@@ -320,7 +320,12 @@ export async function getSource(id: string, orgId: string): Promise<Source | nul
  * org's first source lazily creates its one site rather than requiring a
  * setup step.
  */
-export async function createSource(orgId: string, name: string): Promise<Source> {
+/**
+ * vstSensorId defaults to a mock placeholder (no real VST). Pass a real
+ * value when there's an actual file behind this source — e.g. a local path
+ * from app/api/sources/upload/route.ts for nvidia-hosted mode.
+ */
+export async function createSource(orgId: string, name: string, vstSensorId?: string): Promise<Source> {
   return withTransaction(async (tx) => {
     const existing = await tx<{ id: string }>(`SELECT id FROM site WHERE org_id = $1 LIMIT 1`, [orgId]);
     const siteId = existing.length
@@ -333,7 +338,7 @@ export async function createSource(orgId: string, name: string): Promise<Source>
     const rows = await tx(
       `INSERT INTO source (site_id, name, kind, vst_sensor_id, status)
        VALUES ($1, $2, 'upload', $3, 'online') RETURNING *`,
-      [siteId, name, `mock-upload-${crypto.randomUUID()}`],
+      [siteId, name, vstSensorId ?? `mock-upload-${crypto.randomUUID()}`],
     );
     const r = rows[0];
     return { id: r.id, name: r.name, kind: r.kind, status: r.status, vstSensorId: r.vst_sensor_id ?? undefined };
