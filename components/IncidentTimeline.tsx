@@ -12,6 +12,7 @@ import type { Incident } from '@/lib/types';
 export default function IncidentTimeline({ incidents }: { incidents: Incident[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [alertsOnly, setAlertsOnly] = useState(false);
 
   if (incidents.length === 0) {
     // A clean run is a good outcome, not an empty screen. Design doc §6.
@@ -30,9 +31,10 @@ export default function IncidentTimeline({ incidents }: { incidents: Incident[] 
     return acc;
   }, {});
 
-  const shown = severityFilter === 'all'
-    ? incidents
-    : incidents.filter((i) => i.severity === severityFilter);
+  const alertedCount = incidents.filter((i) => i.alerted).length;
+  const shown = incidents
+    .filter((i) => severityFilter === 'all' || i.severity === severityFilter)
+    .filter((i) => !alertsOnly || i.alerted);
 
   const maxOffset = Math.max(...incidents.map((i) => i.offsetMs), 1);
 
@@ -63,6 +65,10 @@ export default function IncidentTimeline({ incidents }: { incidents: Incident[] 
               onClick={() => setSeverityFilter(s)} />
           ) : null,
         )}
+        {alertedCount > 0 && (
+          <FilterChip label={`alerts ${alertedCount}`} active={alertsOnly}
+            onClick={() => setAlertsOnly((v) => !v)} />
+        )}
       </div>
 
       <ul className="rounded-xl border border-neutral-200 dark:border-neutral-800 divide-y divide-neutral-100 dark:divide-neutral-800">
@@ -78,6 +84,7 @@ export default function IncidentTimeline({ incidents }: { incidents: Incident[] 
                 {formatOffset(i.offsetMs)}
               </span>
               <SeverityChip severity={i.severity} />
+              {i.alerted && <AlertChip />}
               <span className="flex-1 text-sm">{i.description}</span>
               <VerdictChip verdict={i.verdict} />
             </button>
@@ -116,6 +123,14 @@ function SeverityChip({ severity }: { severity: string }) {
   return (
     <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-mono uppercase ${cls}`}>
       {severity}
+    </span>
+  );
+}
+
+function AlertChip() {
+  return (
+    <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-mono uppercase bg-red-600 text-white">
+      alert
     </span>
   );
 }

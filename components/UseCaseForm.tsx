@@ -239,6 +239,15 @@ export default function UseCaseForm({ existing }: { existing?: UseCase }) {
         }
         .dark .input { border-color: rgb(64 64 64 / 1); }
         .input:focus { outline: 2px solid rgb(29 78 216); outline-offset: -1px; }
+
+        /* These come after the base .input rule on purpose: same specificity
+           as a Tailwind width utility, so whichever loads later in the
+           cascade wins — and that used to be .input's width:100%, which made
+           the severity <select> swallow the row and left the name <input>
+           at its flex-basis of 0. Declaring the widths here, after .input,
+           guarantees these win regardless of stylesheet load order. */
+        .event-name { font-size: 14px; width: auto; }
+        .event-severity { width: 108px; flex: 0 0 auto; }
       `}</style>
     </div>
   );
@@ -367,7 +376,7 @@ function EventEditor({
       {events.map((e, i) => (
         <div key={e.id ?? `new-${i}`} className="flex items-center gap-1.5">
           <input
-            className="input flex-1 w-0"
+            className="input event-name flex-1 min-w-0"
             value={e.label}
             placeholder="e.g. Forklift near worker"
             onChange={(ev) => {
@@ -378,7 +387,7 @@ function EventEditor({
             }}
           />
           <select
-            className="input w-28"
+            className="input event-severity"
             value={e.severity}
             onChange={(ev) => update(i, { severity: ev.target.value as Severity })}
           >
@@ -387,7 +396,7 @@ function EventEditor({
           <button
             type="button"
             onClick={() => remove(i)}
-            className="text-neutral-400 hover:text-red-600 px-1.5 text-sm"
+            className="text-neutral-400 hover:text-red-600 px-1.5 text-sm flex-shrink-0"
             aria-label="Remove event"
           >
             ×

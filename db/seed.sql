@@ -18,19 +18,13 @@ INSERT INTO site (id, org_id, name, location, timezone) VALUES
    'Chennai Plant', 'Chennai, IN', 'Asia/Kolkata')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO place (id, site_id, name, latitude, longitude) VALUES
-  ('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000c1',
-   'Loading Dock', 13.0827, 80.2707)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO source (id, site_id, place_id, name, kind, rtsp_url, vst_sensor_id, status) VALUES
+INSERT INTO source (id, site_id, name, kind, rtsp_url, vst_sensor_id, status) VALUES
   ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000c1',
-   '00000000-0000-0000-0000-0000000000d1', 'loading-dock-cam03', 'camera',
-   'rtsp://10.0.0.31/stream', 'vst-cam03', 'online'),
+   'loading-dock-cam03', 'camera', 'rtsp://10.0.0.31/stream', 'vst-cam03', 'online'),
   ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000c1',
-   NULL, 'aisle-cam07', 'camera', 'rtsp://10.0.0.37/stream', 'vst-cam07', 'online'),
+   'aisle-cam07', 'camera', 'rtsp://10.0.0.37/stream', 'vst-cam07', 'online'),
   ('00000000-0000-0000-0000-0000000000e3', '00000000-0000-0000-0000-0000000000c1',
-   NULL, 'bay-b-cam01', 'camera', 'rtsp://10.0.0.11/stream', 'vst-cam01', 'offline')
+   'bay-b-cam01', 'camera', 'rtsp://10.0.0.11/stream', 'vst-cam01', 'offline')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── use cases: all four prompt sets populated ────────────────────────────

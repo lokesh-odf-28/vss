@@ -4,9 +4,10 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type {
-  VssClient, SummarizeRequest, CompletionResponse,
+  VssClient, SummarizeRequest, CompletionResponse, IncidentDraft,
   StreamAddResponse, GenerateCaptionsResponse,
 } from './types';
+import { buildPromptInstruction, extractStructured } from './structuredOutput';
 
 /**
  * Calls a real NVIDIA-hosted VLM directly (integrate.api.nvidia.com),
@@ -25,8 +26,20 @@ import type {
  */
 
 const API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = process.env.NVIDIA_VLM_MODEL ?? 'nvidia/nemotron-nano-12b-v2-vl';
-const NUM_FRAMES = Number(process.env.NVIDIA_VLM_FRAMES ?? 3);
+// nvidia/nemotron-nano-12b-v2-vl reached end-of-life 2026-08-26 (410 Gone).
+// meta/llama-3.2-11b-vision-instruct is confirmed available on this account
+// and follows the structured-output instruction correctly — but it, and
+// every other vision model entitled here, rejects more than one image per
+// request ("At most 1 image(s) may be provided in one prompt"). The
+// multi-image-capable models real VSS would use (Cosmos, VILA, Gemma) are
+// not entitled on this API key. Re-check with:
+//   curl -s https://integrate.api.nvidia.com/v1/models \
+//     -H "Authorization: Bearer $NVIDIA_API_KEY" | python3 -m json.tool | grep -i cosmos
+const MODEL = process.env.NVIDIA_VLM_MODEL ?? 'meta/llama-3.2-11b-vision-instruct';
+// 1, not several — see the model comment above. Analysis judges the video
+// from a single frame at its midpoint (extractFramesB64's sampling formula
+// degrades to that when numFrames=1) until a multi-image model is entitled.
+const NUM_FRAMES = Number(process.env.NVIDIA_VLM_FRAMES ?? 1);
 const REQUEST_TIMEOUT_MS = 120_000;
 
 type JobStatus = 'pending' | 'complete' | 'error';
@@ -34,7 +47,9 @@ interface Job {
   status: JobStatus;
   videoId: string;
   startedAt: number;
-  content?: string;
+  knownCodes: string[];  // the use case's event codes, for validating event_type on parse
+  content?: string;      // cleaned prose only — the JSON block is stripped before this is set
+  events?: IncidentDraft[];
   error?: string;
 }
 
@@ -104,14 +119,17 @@ async function extractFramesB64(videoPath: string, numFrames: number): Promise<s
   }
 }
 
-async function callVlm(systemPrompt: string, userPrompt: string, framesB64: string[]): Promise<string> {
+async function callVlm(
+  systemPrompt: string, userPrompt: string, framesB64: string[], knownCodes: string[],
+): Promise<string> {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY is not set');
 
   const content = [
     {
       type: 'text',
-      text: `The following images are a sequence of frames from a video. Answer the user's question based on the video: ${userPrompt}`,
+      text: `The following images are a sequence of frames from a video. Answer the user's question based on the video: ${userPrompt}`
+        + buildPromptInstruction(knownCodes),
     },
     ...framesB64.map((f) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${f}` } })),
   ];
@@ -173,7 +191,8 @@ export const nvidiaHostedClient: VssClient = {
   // not a VST sensor id — this mode has no VST.
   async summarize(req: SummarizeRequest) {
     const jobId = `nvidia-${randomUUID()}`;
-    jobs.set(jobId, { status: 'pending', videoId: req.id, startedAt: Date.now() });
+    const knownCodes = req.events ?? [];
+    jobs.set(jobId, { status: 'pending', videoId: req.id, startedAt: Date.now(), knownCodes });
 
     // Fire-and-forget: the route awaiting this only needs a job id back
     // quickly. The real work (frame extraction + a slow model call) keeps
@@ -182,10 +201,13 @@ export const nvidiaHostedClient: VssClient = {
       const startedAt = jobs.get(jobId)!.startedAt;
       try {
         const frames = await extractFramesB64(req.id, NUM_FRAMES);
-        const content = await callVlm(req.system_prompt ?? '', req.prompt ?? '', frames);
-        jobs.set(jobId, { status: 'complete', videoId: req.id, startedAt, content });
+        const raw = await callVlm(req.system_prompt ?? '', req.prompt ?? '', frames, knownCodes);
+        // Parsed once, here, at completion — poll() and detectedIncidents()
+        // both just read the split-out fields back off the job afterward.
+        const { summary, events } = extractStructured(raw, knownCodes);
+        jobs.set(jobId, { status: 'complete', videoId: req.id, startedAt, knownCodes, content: summary, events });
       } catch (e) {
-        jobs.set(jobId, { status: 'error', videoId: req.id, startedAt, error: (e as Error).message });
+        jobs.set(jobId, { status: 'error', videoId: req.id, startedAt, knownCodes, error: (e as Error).message });
       }
     })();
 
@@ -199,10 +221,8 @@ export const nvidiaHostedClient: VssClient = {
     return response(jobId, job.videoId, job.status === 'complete', job.content ?? '');
   },
 
-  async detectedIncidents() {
-    // Free text in, free text out — no structured detections. Same honest
-    // limitation as the real VSS client; see TECH-STACK.md §8.
-    return [];
+  async detectedIncidents(jobId: string) {
+    return jobs.get(jobId)?.events ?? [];
   },
 
   async startLiveStream(): Promise<StreamAddResponse> {

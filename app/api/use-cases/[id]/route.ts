@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUseCase, saveUseCase } from '@/lib/store';
+import { getUseCase, saveUseCase, deleteUseCase } from '@/lib/store';
 import { requireUser, UnauthorizedError } from '@/lib/auth';
 import type { UseCaseInput } from '@/lib/types';
 
@@ -54,4 +54,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const saved = await saveUseCase(params.id, ctx.orgId, input);
   if (!saved) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json({ data: saved });
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  let ctx;
+  try {
+    ctx = await requireUser();
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    throw e;
+  }
+
+  const result = await deleteUseCase(params.id, ctx.orgId);
+  if (result === 'not_found') return NextResponse.json({ error: 'not found' }, { status: 404 });
+  return new NextResponse(null, { status: 204 });
 }

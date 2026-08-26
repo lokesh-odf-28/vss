@@ -45,21 +45,11 @@ CREATE TABLE site (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Named geographic location, used by the map (D6) and place-scoped queries.
-CREATE TABLE place (
-  id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  site_id   uuid NOT NULL REFERENCES site(id) ON DELETE CASCADE,
-  name      text NOT NULL,
-  latitude  double precision,
-  longitude double precision
-);
-
 -- ── video sources ────────────────────────────────────────────────────────
 
 CREATE TABLE source (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id       uuid NOT NULL REFERENCES site(id) ON DELETE CASCADE,
-  place_id      uuid REFERENCES place(id) ON DELETE SET NULL,
   name          text NOT NULL,
   kind          text NOT NULL CHECK (kind IN ('camera','upload')),
   rtsp_url      text,              -- cameras only
@@ -206,16 +196,4 @@ CREATE TABLE otp_challenge (
   expires_at    timestamptz NOT NULL,
   created_at    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (email, purpose)
-);
-
--- ── reports ──────────────────────────────────────────────────────────────
-
-CREATE TABLE report (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id       uuid NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
-  template     text NOT NULL,
-  incident_ids uuid[] NOT NULL DEFAULT '{}',
-  file_url     text,
-  created_by   uuid REFERENCES app_user(id) ON DELETE SET NULL,
-  created_at   timestamptz NOT NULL DEFAULT now()
 );

@@ -24,6 +24,8 @@ export default async function RunDetailPage({ params }: { params: { id: string }
         <p className="text-sm text-neutral-500 mt-0.5">
           {run.useCaseName} · {run.status}
           {run.status === 'complete' && ` · ${run.incidentCount} incidents found`}
+          {incidents.some((i) => i.alerted) &&
+            ` · ${incidents.filter((i) => i.alerted).length} would have alerted`}
         </p>
       </header>
 

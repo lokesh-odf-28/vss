@@ -3,6 +3,7 @@ import type {
   StreamAddRequest, StreamAddResponse, GenerateCaptionsRequest, GenerateCaptionsResponse,
   StreamSummarizeRequest,
 } from './types';
+import { buildJsonSchema, extractStructured } from './structuredOutput';
 
 /**
  * Real VSS client — LVS for recorded/live summarization, RTVI for live
@@ -55,27 +56,55 @@ export const realClient: VssClient = {
 
   // ── recorded ───────────────────────────────────────────────────────────
 
+  /**
+   * UNVERIFIED against a live deployment — built from
+   * services/video-summarization/api_spec/openapi.json's documented fields,
+   * not confirmed against a running LVS. `auto_generate_prompt: false` +
+   * `override_vlm_prompt: true` matter here: without them, VSS may replace
+   * the use case's authored prompt/system_prompt with one it generates from
+   * `schema`/`events` itself — structured output should not come at the
+   * cost of the prompt the user actually wrote in C2.
+   */
   summarize(req: SummarizeRequest) {
     return lvs<CompletionResponse>('/v1/summarize', {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify({
+        ...req,
+        schema: buildJsonSchema(req.events ?? []),
+        enable_vlm_structured_output: true,
+        auto_generate_prompt: false,
+        override_vlm_prompt: true,
+      }),
     });
   },
 
   // TODO: confirm the polling endpoint against your deployment. LVS also
   // supports SSE streaming on /v1/summarize; if you use that instead, replace
   // this with an EventSource consumer in the route handler.
-  poll(jobId: string) {
-    return lvs<CompletionResponse>(`/v1/summarize/${jobId}`);
+  //
+  // content is cleaned here (structured JSON in, prose out) so callers of
+  // poll() never see raw JSON where they expect a readable summary —
+  // detectedIncidents() below does the same parse to get the event list.
+  async poll(jobId: string) {
+    const res = await lvs<CompletionResponse>(`/v1/summarize/${jobId}`);
+    const raw = res.choices[0]?.message?.content;
+    if (!raw || res.object !== 'summarization.completion') return res;
+    const { summary } = extractStructured(raw);
+    return { ...res, choices: [{ ...res.choices[0], message: { ...res.choices[0].message, content: summary } }] };
   },
 
-  // Real VSS does not hand back a structured incident list — detections have
-  // to be extracted from the per-chunk captions (/v1/generate_captions) or
-  // read out of Elasticsearch, which the LVS stack writes to. Returning empty
-  // means a real run completes with a summary and no timeline, which is
-  // honest; it does not invent detections that were never reported.
-  async detectedIncidents(_jobId: string) {
-    return [];
+  /**
+   * Re-fetches and re-parses the same completed job poll() already read —
+   * an extra round trip, not a cache, because this path has no request-time
+   * job map to stash a parsed result in (unlike nvidiaHosted.ts). Fine for
+   * now: this only runs once per completed run. Worth a short-lived cache
+   * if this ever shows up in profiling against a real deployment.
+   */
+  async detectedIncidents(jobId: string) {
+    const res = await lvs<CompletionResponse>(`/v1/summarize/${jobId}`);
+    const raw = res.choices[0]?.message?.content;
+    if (!raw) return [];
+    return extractStructured(raw).events;
   },
 
   // ── live ───────────────────────────────────────────────────────────────

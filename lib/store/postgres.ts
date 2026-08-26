@@ -2,6 +2,7 @@ import { q, withTransaction } from '../db';
 import type {
   UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext,
   Incident, Severity, SignUpInput, CreateOtpChallengeInput, OtpChallengeRow, OtpPurpose,
+  AlertRule, AlertRuleInput,
 } from '../types';
 import { slugify } from '../slug';
 
@@ -73,6 +74,20 @@ function toUser(r: any): User {
   return { id: r.id, orgId: r.org_id, email: r.email, name: r.name, role: r.role, status: r.status };
 }
 
+function toAlertRule(r: any): AlertRule {
+  return {
+    id: r.id,
+    useCaseId: r.use_case_id,
+    useCaseName: r.use_case_name,
+    useCaseEventId: r.use_case_event_id,
+    eventLabel: r.event_label,
+    sourceId: r.source_id,
+    sourceName: r.source_name,
+    enabled: r.enabled,
+    createdAt: new Date(r.created_at).toISOString(),
+  };
+}
+
 function toIncident(r: any): Incident {
   return {
     id: r.id,
@@ -84,6 +99,7 @@ function toIncident(r: any): Incident {
     description: r.description,
     verdict: r.verdict,
     thumbnailUrl: r.thumbnail_url,
+    alerted: r.alerted ?? false,
   };
 }
 
@@ -105,6 +121,14 @@ const RUN_SELECT = `
   FROM run r
   JOIN use_case u ON u.id = r.use_case_id
   JOIN source   so ON so.id = r.source_id`;
+
+// alert_rule has no org_id column either — scoped through use_case.
+const ALERT_RULE_SELECT = `
+  SELECT ar.*, u.name AS use_case_name, ue.label AS event_label, s.name AS source_name
+  FROM alert_rule ar
+  JOIN use_case u ON u.id = ar.use_case_id
+  JOIN use_case_event ue ON ue.id = ar.use_case_event_id
+  JOIN source s ON s.id = ar.source_id`;
 
 // ── users ────────────────────────────────────────────────────────────────
 
@@ -262,6 +286,24 @@ export async function saveUseCase(id: string, orgId: string, input: UseCaseInput
   return getUseCaseRaw(id);
 }
 
+/**
+ * `run.use_case_id` is `ON DELETE RESTRICT` (schema.sql), so its runs must
+ * go first. `use_case_event`/`alert_rule` cascade automatically; incidents
+ * are untouched here — `incident.run_id` and `incident.use_case_id` are both
+ * `ON DELETE SET NULL`, so incident history survives (design doc §8: incidents
+ * outlive the run and use case that produced them).
+ */
+export async function deleteUseCase(id: string, orgId: string): Promise<'deleted' | 'not_found'> {
+  const owns = await q(`SELECT 1 FROM use_case WHERE id = $1 AND org_id = $2`, [id, orgId]);
+  if (!owns.length) return 'not_found';
+
+  await withTransaction(async (tx) => {
+    await tx(`DELETE FROM run WHERE use_case_id = $1`, [id]);
+    await tx(`DELETE FROM use_case WHERE id = $1 AND org_id = $2`, [id, orgId]);
+  });
+  return 'deleted';
+}
+
 export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Promise<UseCase> {
   const slug = slugify(input.name);
   const id = await withTransaction(async (tx) => {
@@ -397,11 +439,97 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
   return getRunRaw(id);
 }
 
+// ── alert rules ──────────────────────────────────────────────────────────
+// No external Alert Bridge call here — there is no live streaming pipeline
+// anywhere in this app yet (live mode still 501s), so a rule has nothing to
+// actually trigger today. external_rule_id stays null; wire it up once a
+// real /realtime call has something to register against.
+
+export async function listAlertRules(orgId: string): Promise<AlertRule[]> {
+  const rows = await q(
+    `${ALERT_RULE_SELECT} WHERE u.org_id = $1 ORDER BY u.name, ue.label, s.name`,
+    [orgId],
+  );
+  return rows.map(toAlertRule);
+}
+
+export async function createAlertRule(
+  input: AlertRuleInput, orgId: string,
+): Promise<AlertRule | 'invalid' | 'duplicate'> {
+  const eventOwns = await q(
+    `SELECT 1 FROM use_case_event ue
+     JOIN use_case u ON u.id = ue.use_case_id
+     WHERE ue.id = $1 AND ue.use_case_id = $2 AND u.org_id = $3`,
+    [input.useCaseEventId, input.useCaseId, orgId],
+  );
+  if (!eventOwns.length) return 'invalid';
+
+  const sourceOwns = await q(
+    `SELECT 1 FROM source s JOIN site st ON st.id = s.site_id WHERE s.id = $1 AND st.org_id = $2`,
+    [input.sourceId, orgId],
+  );
+  if (!sourceOwns.length) return 'invalid';
+
+  try {
+    const rows = await q<{ id: string }>(
+      `INSERT INTO alert_rule (use_case_id, use_case_event_id, source_id)
+       VALUES ($1,$2,$3) RETURNING id`,
+      [input.useCaseId, input.useCaseEventId, input.sourceId],
+    );
+    const created = await q(`${ALERT_RULE_SELECT} WHERE ar.id = $1`, [rows[0].id]);
+    return toAlertRule(created[0]);
+  } catch (e: any) {
+    if (e?.code === '23505') return 'duplicate';
+    throw e;
+  }
+}
+
+export async function updateAlertRuleEnabled(
+  id: string, orgId: string, enabled: boolean,
+): Promise<AlertRule | null> {
+  const rows = await q<{ id: string }>(
+    `UPDATE alert_rule ar SET enabled = $3
+     FROM use_case u
+     WHERE ar.id = $1 AND ar.use_case_id = u.id AND u.org_id = $2
+     RETURNING ar.id`,
+    [id, orgId, enabled],
+  );
+  if (!rows.length) return null;
+  const updated = await q(`${ALERT_RULE_SELECT} WHERE ar.id = $1`, [id]);
+  return toAlertRule(updated[0]);
+}
+
+export async function deleteAlertRule(id: string, orgId: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `DELETE FROM alert_rule ar
+     USING use_case u
+     WHERE ar.id = $1 AND ar.use_case_id = u.id AND u.org_id = $2
+     RETURNING ar.id`,
+    [id, orgId],
+  );
+  return rows.length > 0;
+}
+
 // ── incidents ────────────────────────────────────────────────────────────
 
+/**
+ * "alerted" is computed here, not stored — an EXISTS against the current
+ * alert_rule rows, joined via use_case_event.code = incident.event_code
+ * (the same code-based match the runs poll route uses to look up severity).
+ * That means enabling a rule after the fact lights up past runs too —
+ * detection and alerting are genuinely decoupled steps, not a snapshot.
+ */
 export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
   const rows = await q(
-    `SELECT * FROM incident WHERE run_id = $1 ORDER BY offset_ms NULLS LAST, started_at`,
+    `SELECT i.*,
+       EXISTS (
+         SELECT 1 FROM use_case_event ue
+         JOIN alert_rule ar ON ar.use_case_event_id = ue.id AND ar.source_id = i.source_id AND ar.enabled
+         WHERE ue.use_case_id = i.use_case_id AND ue.code = i.event_code
+       ) AS alerted
+     FROM incident i
+     WHERE i.run_id = $1
+     ORDER BY i.offset_ms NULLS LAST, i.started_at`,
     [runId],
   );
   return rows.map(toIncident);

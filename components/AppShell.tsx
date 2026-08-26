@@ -8,7 +8,7 @@ const NAV = [
   { href: '/runs',      label: 'Runs',      icon: '▶' },
   { href: '/search',    label: 'Search',    icon: '🔎', todo: true },
   { href: '/incidents', label: 'Incidents', icon: '📋', todo: true },
-  { href: '/alerts',    label: 'Alerts',    icon: '⚠️', todo: true },
+  { href: '/alerts',    label: 'Alerts',    icon: '⚠️' },
   { href: '/sources',   label: 'Sources',   icon: '🎥', todo: true },
 ];
 

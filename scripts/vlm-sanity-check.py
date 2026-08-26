@@ -57,13 +57,17 @@ except ImportError:
     _SSL_CONTEXT = None
 
 API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-# cosmos3-nano-reasoner (VSS's own default) isn't exposed on the public API
-# catalog for every account — confirm what's actually available with:
+# nemotron-nano-12b-v2-vl reached end-of-life 2026-08-26 (410 Gone).
+# cosmos3-nano-reasoner (VSS's own default) still isn't exposed on this
+# account's API catalog either — confirm what's actually available with:
 #   curl -s https://integrate.api.nvidia.com/v1/models \
 #     -H "Authorization: Bearer $NVIDIA_API_KEY" | python3 -m json.tool | grep -i cosmos
-# nemotron-nano-12b-v2-vl is a real vision-language model and was confirmed
-# present. Override with --model if you find cosmos or another VLM available.
-MODEL = "nvidia/nemotron-nano-12b-v2-vl"
+# llama-3.2-11b-vision-instruct is confirmed present and follows the
+# structured-output instruction correctly. Override with --model if you find
+# cosmos or another VLM available. Note: every vision model entitled on this
+# account (including this one) rejects more than one image per request, which
+# is why --frames now defaults to 1 below.
+MODEL = "meta/llama-3.2-11b-vision-instruct"
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a warehouse safety inspector reviewing recorded CCTV footage. "
@@ -146,7 +150,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--video", required=True, help="Path to a local video file")
     parser.add_argument("--model", default=MODEL, help=f"NVIDIA API catalog model id (default {MODEL})")
-    parser.add_argument("--frames", type=int, default=6, help="Number of frames to sample (default 6)")
+    parser.add_argument("--frames", type=int, default=1,
+                         help="Number of frames to sample (default 1 — the vision models entitled on "
+                              "this account cap at one image per request; see the MODEL comment above)")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="User/task prompt")
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help="System prompt")
     parser.add_argument("--timeout", type=int, default=300,

@@ -54,7 +54,7 @@ lib/
     types.ts             wire types mirrored from the OpenAPI spec
 db/
   schema.sql           Postgres schema for all entities
-  migrations/           001_auth.sql, 002_otp_challenge.sql
+  migrations/           001_auth.sql, 002_otp_challenge.sql, 003_drop_unused_tables.sql
 middleware.ts          edge route gate (session cookie check only, no DB)
 ```
 

@@ -1,6 +1,7 @@
 import type {
   UseCase, UseCaseInput, Run, Source, User, UserWithSecret, AuthContext,
   Incident, Severity, SignUpInput, CreateOtpChallengeInput, OtpChallengeRow, OtpPurpose,
+  AlertRule, AlertRuleInput,
 } from '../types';
 import { slugify } from '../slug';
 import { seedUseCases, seedSources } from '../seed';
@@ -25,6 +26,18 @@ const DEV_ORG_ID = 'org-dev';
 type Tagged<T> = T & { _orgId: string };
 type OtpChallengeEntry = OtpChallengeRow & { purpose: OtpPurpose };
 
+/** Raw stored shape — enriched with names at read time via toAlertRule,
+ * mirroring postgres.ts's ALERT_RULE_SELECT join. Keeps renames (event
+ * label, camera name) reflected immediately, same as Postgres. */
+interface AlertRuleRecord {
+  id: string;
+  useCaseId: string;
+  useCaseEventId: string;
+  sourceId: string;
+  enabled: boolean;
+  createdAt: string;
+}
+
 /**
  * Cached on globalThis, same reasoning as lib/db.ts's pool and
  * lib/vss/mock.ts's job map: Next's dev server does not reliably share a
@@ -42,6 +55,7 @@ declare global {
     incidents: Map<string, Incident>;
     otpChallenges: Map<string, OtpChallengeEntry>;
     users: Map<string, UserWithSecret>;
+    alertRules: Map<string, Tagged<AlertRuleRecord>>;
   } | undefined;
 }
 
@@ -56,8 +70,9 @@ const memState = globalThis.__vi_mem_state ?? (globalThis.__vi_mem_state = {
   incidents: new Map<string, Incident>(),
   otpChallenges: new Map<string, OtpChallengeEntry>(),
   users: new Map<string, UserWithSecret>(),
+  alertRules: new Map<string, Tagged<AlertRuleRecord>>(),
 });
-const { useCases, sources, runs, incidents, otpChallenges } = memState;
+const { useCases, sources, runs, incidents, otpChallenges, alertRules } = memState;
 const otpKey = (purpose: OtpPurpose, email: string) => `${purpose}:${email.toLowerCase()}`;
 
 function strip<T extends { _orgId: string }>({ _orgId, ...rest }: T): Omit<T, '_orgId'> {
@@ -140,16 +155,24 @@ export async function deleteOtpChallenge(purpose: OtpPurpose, email: string): Pr
 
 // ── use cases ────────────────────────────────────────────────────────────
 
+/** Live count of enabled alert rules — mirrors postgres.ts's ALERT_RULE_SELECT
+ * subquery. The stored alertRuleCount field (seed data only) is overridden
+ * here rather than trusted, so it doesn't go stale once rules are created. */
+function countEnabledAlertRules(useCaseId: string): number {
+  return [...alertRules.values()].filter((r) => r.useCaseId === useCaseId && r.enabled).length;
+}
+
 export async function listUseCases(orgId: string): Promise<UseCase[]> {
   return [...useCases.values()]
     .filter((u) => u._orgId === orgId)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(strip);
+    .map((u) => ({ ...strip(u), alertRuleCount: countEnabledAlertRules(u.id) }));
 }
 
 export async function getUseCase(id: string, orgId: string): Promise<UseCase | null> {
   const u = useCases.get(id);
-  return u && u._orgId === orgId ? strip(u) : null;
+  if (!u || u._orgId !== orgId) return null;
+  return { ...strip(u), alertRuleCount: countEnabledAlertRules(u.id) };
 }
 
 /**
@@ -191,6 +214,20 @@ export async function saveUseCase(id: string, orgId: string, input: UseCaseInput
   };
   useCases.set(id, next);
   return strip(next);
+}
+
+/** Mirrors postgres.ts: its runs go too (run.use_case_id is ON DELETE
+ * RESTRICT there), incidents are left as-is — same effective outcome as
+ * Postgres's ON DELETE SET NULL, since nothing reaches an incident except
+ * by the runId of a run that no longer exists. */
+export async function deleteUseCase(id: string, orgId: string): Promise<'deleted' | 'not_found'> {
+  const existing = useCases.get(id);
+  if (!existing || existing._orgId !== orgId) return 'not_found';
+  for (const [runId, r] of runs) {
+    if (r.useCaseId === id) runs.delete(runId);
+  }
+  useCases.delete(id);
+  return 'deleted';
 }
 
 export async function createUseCase(input: UseCaseInput, ctx: AuthContext): Promise<UseCase> {
@@ -286,12 +323,106 @@ export async function updateRun(id: string, patch: Partial<Run>): Promise<Run | 
   return strip(next);
 }
 
+// ── alert rules ──────────────────────────────────────────────────────────
+// Mirrors postgres.ts: no external Alert Bridge call — nothing in this app
+// has a live streaming pipeline to trigger yet, so a rule only registers
+// intent locally.
+
+function toAlertRule(r: Tagged<AlertRuleRecord>): AlertRule {
+  const uc = useCases.get(r.useCaseId);
+  const src = sources.get(r.sourceId);
+  const event = uc?.events.find((e) => e.id === r.useCaseEventId);
+  return {
+    id: r.id,
+    useCaseId: r.useCaseId,
+    useCaseName: uc?.name ?? '',
+    useCaseEventId: r.useCaseEventId,
+    eventLabel: event?.label ?? '',
+    sourceId: r.sourceId,
+    sourceName: src?.name ?? '',
+    enabled: r.enabled,
+    createdAt: r.createdAt,
+  };
+}
+
+export async function listAlertRules(orgId: string): Promise<AlertRule[]> {
+  return [...alertRules.values()]
+    .filter((r) => r._orgId === orgId)
+    .map(toAlertRule)
+    .sort((a, b) =>
+      a.useCaseName.localeCompare(b.useCaseName)
+      || a.eventLabel.localeCompare(b.eventLabel)
+      || a.sourceName.localeCompare(b.sourceName));
+}
+
+export async function createAlertRule(
+  input: AlertRuleInput, orgId: string,
+): Promise<AlertRule | 'invalid' | 'duplicate'> {
+  const uc = useCases.get(input.useCaseId);
+  if (!uc || uc._orgId !== orgId) return 'invalid';
+  const event = uc.events.find((e) => e.id === input.useCaseEventId);
+  if (!event) return 'invalid';
+  const src = sources.get(input.sourceId);
+  if (!src || src._orgId !== orgId) return 'invalid';
+
+  const dup = [...alertRules.values()].some(
+    (r) => r._orgId === orgId && r.useCaseEventId === input.useCaseEventId && r.sourceId === input.sourceId,
+  );
+  if (dup) return 'duplicate';
+
+  const id = `alr-${Math.random().toString(36).slice(2, 10)}`;
+  const record: Tagged<AlertRuleRecord> = {
+    id,
+    useCaseId: input.useCaseId,
+    useCaseEventId: input.useCaseEventId,
+    sourceId: input.sourceId,
+    enabled: true,
+    createdAt: new Date().toISOString(),
+    _orgId: orgId,
+  };
+  alertRules.set(id, record);
+  return toAlertRule(record);
+}
+
+export async function updateAlertRuleEnabled(
+  id: string, orgId: string, enabled: boolean,
+): Promise<AlertRule | null> {
+  const r = alertRules.get(id);
+  if (!r || r._orgId !== orgId) return null;
+  const next = { ...r, enabled };
+  alertRules.set(id, next);
+  return toAlertRule(next);
+}
+
+export async function deleteAlertRule(id: string, orgId: string): Promise<boolean> {
+  const r = alertRules.get(id);
+  if (!r || r._orgId !== orgId) return false;
+  alertRules.delete(id);
+  return true;
+}
+
 // ── incidents ────────────────────────────────────────────────────────────
 
+/** Mirrors postgres.ts: "alerted" is computed here against the current
+ * alertRules map, not stored — enabling a rule after the fact lights up
+ * past runs too. */
 export async function listIncidentsByRun(runId: string): Promise<Incident[]> {
+  const run = runs.get(runId);
+  const uc = run?.useCaseId ? useCases.get(run.useCaseId) : undefined;
+
   return [...incidents.values()]
     .filter((i) => i.runId === runId)
+    .map((i) => ({ ...i, alerted: isAlerted(i, uc) }))
     .sort((a, b) => a.offsetMs - b.offsetMs);
+}
+
+function isAlerted(i: Incident, uc: Tagged<UseCase> | undefined): boolean {
+  if (!uc) return false;
+  const event = uc.events.find((e) => e.code === i.eventCode);
+  if (!event) return false;
+  return [...alertRules.values()].some(
+    (r) => r.useCaseEventId === event.id && r.sourceId === i.sourceId && r.enabled,
+  );
 }
 
 export interface NewIncident {
@@ -318,6 +449,7 @@ export async function createIncidents(items: NewIncident[]): Promise<number> {
       description: i.description,
       verdict: 'unverified',
       thumbnailUrl: null,
+      alerted: false, // placeholder — listIncidentsByRun recomputes this live
     });
   }
   return items.length;

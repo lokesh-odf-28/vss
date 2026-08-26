@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { listUseCases } from '@/lib/store';
 import { currentUser } from '@/lib/auth';
 import RunButton from '@/components/RunButton';
+import DeleteUseCaseButton from '@/components/DeleteUseCaseButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,7 @@ export default async function UseCasesPage() {
                   >
                     Edit
                   </Link>
+                  <DeleteUseCaseButton useCaseId={uc.id} useCaseName={uc.name} />
                   <RunButton useCaseId={uc.id} />
                 </div>
               </div>

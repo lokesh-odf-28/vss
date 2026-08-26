@@ -158,6 +158,26 @@ export interface Run {
   incidentCount: number;
 }
 
+/** One event, on one camera, that should page someone. Severity lives on
+ * the event (UseCaseEvent), not here — see db/schema.sql. */
+export interface AlertRule {
+  id: string;
+  useCaseId: string;
+  useCaseName: string;
+  useCaseEventId: string;
+  eventLabel: string;
+  sourceId: string;
+  sourceName: string;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface AlertRuleInput {
+  useCaseId: string;
+  useCaseEventId: string;
+  sourceId: string;
+}
+
 export interface Incident {
   id: string;
   sourceId: string;
@@ -169,4 +189,8 @@ export interface Incident {
   description: string;
   verdict: Verdict;
   thumbnailUrl: string | null;
+  /** True if an enabled alert_rule matches this incident's event + camera —
+   * computed at read time from the current rules, not stored. See
+   * lib/store/{postgres,memory}.ts's listIncidentsByRun. */
+  alerted: boolean;
 }
