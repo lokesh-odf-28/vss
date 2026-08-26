@@ -49,7 +49,7 @@ export default function IncidentTimeline({ incidents }: { incidents: Incident[] 
             onClick={() => setSelectedId(i.id)}
             title={`${formatOffset(i.offsetMs)} — ${i.description}`}
             style={{ left: `${(i.offsetMs / maxOffset) * 96}%` }}
-            className={`absolute top-1.5 w-1 h-4 rounded-sm transition-transform ${dotColor(i.severity)} ${
+            className={`absolute top-1.5 w-1 h-4 rounded-sm transition-transform hover:scale-x-150 ${dotColor(i.severity)} ${
               selectedId === i.id ? 'scale-y-150' : ''
             }`}
           />
@@ -76,7 +76,7 @@ export default function IncidentTimeline({ incidents }: { incidents: Incident[] 
           <li key={i.id}>
             <button
               onClick={() => setSelectedId(i.id)}
-              className={`w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
+              className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
                 selectedId === i.id ? 'bg-blue-50 dark:bg-blue-950' : ''
               }`}
             >
@@ -149,10 +149,10 @@ function FilterChip({
   return (
     <button
       onClick={onClick}
-      className={`rounded px-2 py-0.5 text-[10px] font-mono uppercase border ${
+      className={`rounded px-2 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
         active
           ? 'border-neutral-900 dark:border-neutral-100 font-semibold'
-          : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
+          : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:border-neutral-400 dark:hover:border-neutral-600'
       }`}
     >
       {label}

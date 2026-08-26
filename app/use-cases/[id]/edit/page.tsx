@@ -12,7 +12,7 @@ export default async function EditUseCasePage({ params }: { params: { id: string
   if (!uc) notFound();
 
   return (
-    <div className="p-6">
+    <div className="p-6 animate-fade-in">
       <header className="mb-5">
         <h1 className="text-lg font-semibold">Edit use case</h1>
         <p className="text-sm text-neutral-500 mt-0.5">{uc.name}</p>

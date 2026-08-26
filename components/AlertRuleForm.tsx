@@ -80,7 +80,7 @@ export default function AlertRuleForm({
         <button
           onClick={create}
           disabled={busy || !useCaseId || !eventId || !sourceId}
-          className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50 disabled:hover:bg-blue-700"
         >
           {busy ? 'Adding…' : '＋ Add rule'}
         </button>

@@ -216,13 +216,13 @@ export default function UseCaseForm({ existing }: { existing?: UseCase }) {
         <button
           onClick={save}
           disabled={saving || !form.name.trim()}
-          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 disabled:hover:bg-blue-700"
         >
           {saving ? 'Saving…' : existing ? 'Save changes' : 'Create use case'}
         </button>
         <button
           onClick={() => router.push('/use-cases')}
-          className="rounded-md border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm"
+          className="rounded-md border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
         >
           Cancel
         </button>

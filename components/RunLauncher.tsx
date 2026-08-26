@@ -156,7 +156,7 @@ export default function RunLauncher({
       )}
       {mode === 'recorded' && (
         <div className="mb-3">
-          <label className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-800 px-3.5 py-2.5 text-sm cursor-pointer hover:border-neutral-400">
+          <label className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-800 px-3.5 py-2.5 text-sm cursor-pointer transition-colors hover:border-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-900">
             <span>📁</span>
             <span className="font-medium">{uploadBusy ? 'Adding…' : 'Upload a video'}</span>
             <input
@@ -221,13 +221,13 @@ export default function RunLauncher({
         <button
           onClick={start}
           disabled={!canStart}
-          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:hover:bg-blue-700"
         >
           {busy ? 'Starting…' : `Start ${mode} run`}
         </button>
         <button
           onClick={() => router.push('/use-cases')}
-          className="rounded-md border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm"
+          className="rounded-md border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
         >
           Cancel
         </button>

@@ -52,7 +52,7 @@ export default function SignInForm({ next }: { next?: string }) {
       <div>
         <div className="flex items-center justify-between mb-1">
           <label htmlFor="password" className="block text-xs font-semibold">Password</label>
-          <a href="/forgot-password" className="text-[11px] text-blue-700 dark:text-blue-400 font-medium">Forgot password?</a>
+          <a href="/forgot-password" className="text-[11px] text-blue-700 dark:text-blue-400 font-medium hover:underline">Forgot password?</a>
         </div>
         <input
           id="password" type="password" autoComplete="current-password" required
@@ -62,7 +62,7 @@ export default function SignInForm({ next }: { next?: string }) {
       </div>
       <button
         type="submit" disabled={busy}
-        className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 disabled:hover:bg-blue-700"
       >
         {busy ? 'Signing in…' : 'Sign in'}
       </button>

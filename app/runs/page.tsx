@@ -37,7 +37,7 @@ export default function RunsPage() {
   const recent = runs.filter((r) => !active.includes(r));
 
   return (
-    <div className="p-6">
+    <div className="p-6 animate-fade-in">
       <header className="mb-5">
         <h1 className="text-lg font-semibold">Runs</h1>
         <p className="text-sm text-neutral-500 mt-0.5">
@@ -53,7 +53,7 @@ export default function RunsPage() {
       )}
 
       {active.map((r) => (
-        <div key={r.id} className="rounded-xl border-2 border-blue-600 p-4 mb-3 bg-white dark:bg-neutral-900">
+        <div key={r.id} className="animate-slide-up rounded-xl border-2 border-blue-600 p-4 mb-3 bg-white dark:bg-neutral-900">
           <div className="flex items-start justify-between mb-3">
             <div>
               <div className="font-semibold text-sm">{r.sourceName}</div>
@@ -61,7 +61,8 @@ export default function RunsPage() {
                 {r.useCaseName} · {r.mode}
               </div>
             </div>
-            <span className="rounded bg-blue-50 dark:bg-blue-950 px-2 py-0.5 text-[9px] font-mono uppercase text-blue-700 dark:text-blue-300">
+            <span className="flex items-center gap-1.5 rounded bg-blue-50 dark:bg-blue-950 px-2 py-0.5 text-[9px] font-mono uppercase text-blue-700 dark:text-blue-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-pulse" />
               {r.status}
             </span>
           </div>
@@ -85,7 +86,7 @@ export default function RunsPage() {
               <Link
                 key={r.id}
                 href={`/runs/${r.id}`}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900"
               >
                 <StatusChip status={r.status} />
                 <span className="flex-1 truncate">{r.sourceName}</span>
@@ -111,7 +112,7 @@ function Phase({ label, value, note, done }: { label: string; value: number; not
       </div>
       <div className="h-1.5 rounded bg-neutral-100 dark:bg-neutral-800 overflow-hidden">
         <div
-          className={`h-full rounded ${done ? 'bg-emerald-600' : 'bg-blue-600'}`}
+          className={`h-full rounded transition-[width] duration-700 ease-out ${done ? 'bg-emerald-600' : 'bg-blue-600'}`}
           style={{ width: `${value}%` }}
         />
       </div>

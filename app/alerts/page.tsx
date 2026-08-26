@@ -18,7 +18,7 @@ export default async function AlertsPage() {
   ]);
 
   return (
-    <div className="p-6">
+    <div className="p-6 animate-fade-in">
       <header className="mb-5">
         <h1 className="text-lg font-semibold">Alerts</h1>
         <p className="text-sm text-neutral-500 mt-0.5">

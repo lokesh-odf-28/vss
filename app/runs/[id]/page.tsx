@@ -16,8 +16,8 @@ export default async function RunDetailPage({ params }: { params: { id: string }
   const incidents = run.status === 'complete' ? await listIncidentsByRun(run.id) : [];
 
   return (
-    <div className="p-6">
-      <Link href="/runs" className="text-xs text-neutral-500 underline">← Runs</Link>
+    <div className="p-6 animate-fade-in">
+      <Link href="/runs" className="text-xs text-neutral-500 underline hover:text-neutral-800 dark:hover:text-neutral-200">← Runs</Link>
 
       <header className="mt-3 mb-5">
         <h1 className="text-lg font-semibold">{run.sourceName}</h1>

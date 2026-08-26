@@ -17,8 +17,8 @@ export default async function RunLaunchPage({ params }: { params: { id: string }
   if (!useCase) notFound();
 
   return (
-    <div className="p-6">
-      <Link href="/use-cases" className="text-xs text-neutral-500 underline">← Use Cases</Link>
+    <div className="p-6 animate-fade-in">
+      <Link href="/use-cases" className="text-xs text-neutral-500 underline hover:text-neutral-800 dark:hover:text-neutral-200">← Use Cases</Link>
       <header className="mt-3 mb-5 flex items-center gap-2.5">
         <span className="text-2xl">{useCase.icon}</span>
         <div>

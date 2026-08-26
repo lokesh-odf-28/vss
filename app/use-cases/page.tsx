@@ -17,7 +17,7 @@ export default async function UseCasesPage() {
   const useCases = await listUseCases(user.orgId);
 
   return (
-    <div className="p-6">
+    <div className="p-6 animate-fade-in">
       <header className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-lg font-semibold">Use Cases</h1>
@@ -27,7 +27,7 @@ export default async function UseCasesPage() {
         </div>
         <Link
           href="/use-cases/new"
-          className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white"
+          className="rounded-md bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800"
         >
           ＋ New use case
         </Link>
@@ -40,7 +40,7 @@ export default async function UseCasesPage() {
           {useCases.map((uc) => (
             <div
               key={uc.id}
-              className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 bg-white dark:bg-neutral-900"
+              className="group rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 bg-white dark:bg-neutral-900 transition-all hover:-translate-y-0.5 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-md dark:hover:shadow-black/30"
             >
               <div className="flex items-center gap-2.5">
                 <span className="text-xl">{uc.icon}</span>
@@ -64,7 +64,7 @@ export default async function UseCasesPage() {
                 <div className="flex gap-1.5">
                   <Link
                     href={`/use-cases/${uc.id}/edit`}
-                    className="rounded-md border border-neutral-200 dark:border-neutral-700 px-2.5 py-1 text-xs"
+                    className="rounded-md border border-neutral-200 dark:border-neutral-700 px-2.5 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
                   >
                     Edit
                   </Link>

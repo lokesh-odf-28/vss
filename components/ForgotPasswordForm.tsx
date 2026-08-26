@@ -111,7 +111,7 @@ export default function ForgotPasswordForm() {
         </div>
         <button
           type="submit" disabled={busy || code.length !== 6}
-          className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 disabled:hover:bg-blue-700"
         >
           {busy ? 'Resetting…' : 'Reset password'}
         </button>
@@ -145,7 +145,7 @@ export default function ForgotPasswordForm() {
       </div>
       <button
         type="submit" disabled={busy}
-        className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        className="w-full rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 disabled:hover:bg-blue-700"
       >
         {busy ? 'Sending…' : 'Send reset code'}
       </button>

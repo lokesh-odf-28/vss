@@ -1,7 +1,7 @@
-import Link from 'next/link';
 import { currentUser } from '@/lib/auth';
 import { vssMode } from '@/lib/vss';
 import SignOutButton from './SignOutButton';
+import NavLinks from './NavLinks';
 
 const NAV = [
   { href: '/use-cases', label: 'Use Cases', icon: '🧭' },
@@ -24,23 +24,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
           <div className="font-semibold">Video Intelligence</div>
           <div className="text-[10px] tracking-widest text-neutral-500 mt-0.5">ON NVIDIA VSS</div>
         </div>
-        <nav className="mt-6 flex flex-col gap-0.5">
-          {NAV.map((n) => (
-            <Link
-              key={n.href}
-              href={n.todo ? '#' : n.href}
-              className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm ${
-                n.todo
-                  ? 'text-neutral-400 dark:text-neutral-600 cursor-default'
-                  : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900'
-              }`}
-            >
-              <span className="w-4 text-center text-xs">{n.icon}</span>
-              {n.label}
-              {n.todo && <span className="ml-auto text-[9px] uppercase tracking-wider">todo</span>}
-            </Link>
-          ))}
-        </nav>
+        <NavLinks items={NAV} />
         <div className="mt-auto pt-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2">
           <div className="px-2">
             <div className="text-xs font-medium truncate">{user.name}</div>
